@@ -1,0 +1,382 @@
+---
+description: Walks a developer through bootstrapping a BRAND-NEW Android project for agentic CLI delivery — creating the Firebase project, registering the Android app, setting up App Distribution, creating the Google Play Console listing, wiring API access, and installing the Gradle plugins. Use when the user says they're starting a new project from scratch, have no Firebase yet, have no Play Console listing yet, asks how to set up Firebase or Play Console for a fresh app, or asks to replicate the agentic delivery setup in a different repo.
+alwaysApply: false
+---
+
+# Bootstrapping a new Android project for agentic CLI delivery
+
+This rule is for the **brand-new-project** case. If the user is joining an
+already-configured project (just needs credentials + machine setup), point
+them at `.cursor/rules/android-project-onboarding.mdc` instead.
+
+The end state after this walkthrough: the user's new project has a working
+Firebase App Distribution + Google Play Console delivery pipeline that an
+agent can drive via `./gradlew` one-liners — exactly the setup demonstrated
+in `docs/agentic-showcase.md`.
+
+## What you're signing up for (state this up front)
+
+Tell the user, before starting:
+
+> Realistic timeline: this is **~1 full afternoon of hands-on work**, plus
+> potentially **1–2 days of waiting** for Google Play developer account ID
+> verification on the first run. There's a **$25 one-time Play Console fee**.
+> If you're doing this for a personal project, that's the bill. If you're
+> doing it for a client, get the client's Google account on the developer
+> account or your hours add up fast.
+>
+> Most of this is irreversible once it's live, so I'll flag the gates as we
+> go.
+
+## Operating principles for this walkthrough
+
+- **Sequential, not parallel.** Firebase has prerequisites for Play; Play has
+  prerequisites for plugin wiring. Don't jump ahead.
+- **Confirm at every gate.** Before each "create a new thing in a Console"
+  step, recap what's about to happen and confirm the user wants to proceed.
+- **Flag costs.** $25 fee, paid SHA-1 verification waits, the (occasional)
+  cost of an Apple-equivalent for iOS later if the user adds it.
+- **Save credentials immediately.** Every JSON key you generate, immediately
+  tell the user to save somewhere persistent (1Password, gitignored repo
+  folder). Lost service-account keys = full reset.
+- **Distinguish what's per-project from what's per-developer-account.** The
+  Google Play developer account is once-per-organization; the app listing is
+  once-per-app; the service account is once-per-app; tester groups are
+  per-Firebase-project. The user will conflate these on first run.
+
+## Prerequisites (Step 0)
+
+Before touching any console, confirm with the user:
+
+- They have an Android project that **builds locally** (`./gradlew
+  assembleDebug` works). If not, they need the machine-setup onboarding rule
+  first, OR they're earlier than this rule's scope — point them at
+  `developer.android.com/studio/projects/create-project`.
+- They own a **Google account** they're willing to permanently associate with
+  this app.
+- They have a **credit/debit card** ready (Play Console one-time $25 fee).
+- They have a **package id** chosen and locked in their `app/build.gradle`
+  (`applicationId`). This becomes part of every Firebase / Play registration
+  and is hard to change later.
+- They have a **release keystore generated** — see Step 4 of the onboarding
+  rule for the `keytool` command. Need it to compute the SHA-1 fingerprint
+  Firebase will ask for.
+
+## Step 1 — Firebase project
+
+Walk through:
+
+1. Open [console.firebase.google.com](https://console.firebase.google.com), sign in.
+2. Click **Add project** → name it (use the app name + environment, e.g. `MyApp` or `MyApp-QA` if you'll have multiple).
+3. Google Analytics: optional. Enabling it later is easy; skip if unsure.
+4. Wait for project creation (~30s).
+
+After project exists, register the Android app:
+
+1. Project home → click the Android icon to add an Android app.
+2. **Package name** = the exact `applicationId` from `app/build.gradle`. Case-sensitive.
+3. **App nickname** = cosmetic, anything helpful.
+4. **SHA-1 fingerprint** — compute locally from the user's release keystore:
+   ```bash
+   keytool -list -v -keystore <path-to-keystore> -alias <key-alias> | grep SHA1
+   ```
+   Paste the SHA-1 into the Firebase form.
+5. Download `google-services.json` when prompted. Save it to `app/google-services.json` (yes, inside the `app/` module, not the root). Add to `.gitignore` if not already.
+
+Wire the `google-services` Gradle plugin:
+
+- **Root `build.gradle`** (project-level) — `dependencies { classpath`:
+  ```gradle
+  classpath 'com.google.gms:google-services:4.4.2'
+  ```
+- **App `build.gradle`** — top of file, in the `plugins { ... }` block:
+  ```gradle
+  id 'com.google.gms.google-services'
+  ```
+
+Verify: `./gradlew :app:assembleDebug` succeeds. If Gradle complains it can't find the plugin, the classpath line is wrong; if it complains it can't find `google-services.json`, the file is in the wrong directory.
+
+## Step 2 — Firebase App Distribution
+
+Still in the Firebase Console:
+
+1. Left sidebar → **App Distribution** (under "Release & Monitor").
+2. If the feature isn't enabled, click through the enable flow.
+3. **Testers and groups** tab → **Add group**.
+4. Set group alias (URL-safe, e.g. `qa-testers`) and display name (human, e.g. `QA Testers`).
+5. Add at least one tester email (the user's own email — that way they can verify uploads work).
+
+Create the upload service account:
+
+1. Project Settings → **Service accounts** tab.
+2. Click **Generate new private key** under "Firebase Admin SDK".
+3. Save the downloaded JSON as `firebase-service-account.json` in the project root (next to `app/`, not inside it). **Add to `.gitignore` immediately** — this key has full project access; leaking it is bad.
+
+Wire the App Distribution Gradle plugin:
+
+- **Root `build.gradle`**:
+  ```gradle
+  classpath 'com.google.firebase:firebase-appdistribution-gradle:5.0.0'
+  ```
+- **App `build.gradle`**:
+  ```gradle
+  id 'com.google.firebase.appdistribution'
+  ```
+- Add a per-flavor configuration block (or, for a single-flavor app, inside `android.buildTypes.release`):
+  ```gradle
+  firebaseAppDistribution {
+      artifactType = "APK"           // or "AAB"
+      artifactPath = "./app/build/outputs/apk/release/app-release.apk"
+      appId = "1:XXX:android:YYY"    // from google-services.json → mobilesdk_app_id
+      serviceCredentialsFile = "./firebase-service-account.json"
+      releaseNotesFile = "./release_notes.txt"
+      groups = "qa-testers"          // the alias from earlier
+  }
+  ```
+
+Create `release_notes.txt` in project root with a placeholder line.
+
+Verify:
+```bash
+./gradlew :app:assembleRelease :app:appDistributionUploadRelease
+```
+
+Expected: a `BUILD SUCCESSFUL` and a Firebase URL to the new release. The tester(s) you added will receive an email within ~1 minute.
+
+## Step 3 — Crashlytics (optional but standard)
+
+Most teams want this. ~10 minutes.
+
+1. Firebase Console left sidebar → **Crashlytics** → enable.
+2. Root `build.gradle`:
+   ```gradle
+   classpath 'com.google.firebase:firebase-crashlytics-gradle:3.0.2'
+   ```
+3. App `build.gradle`:
+   ```gradle
+   id 'com.google.firebase.crashlytics'
+   ```
+4. App dependencies:
+   ```gradle
+   implementation platform('com.google.firebase:firebase-bom:33.5.1')
+   implementation 'com.google.firebase:firebase-crashlytics'
+   implementation 'com.google.firebase:firebase-analytics'  // recommended companion
+   ```
+
+Verify: build succeeds; first crash report appears after the first real crash on a device (no good way to dry-run without forcing a crash).
+
+## Step 4 — Google Play Console developer account
+
+**This is the gate.** Read aloud to the user:
+
+> Before we go further: creating the Google Play developer account costs
+> $25, requires Google to verify your identity (driver's license or passport
+> upload), and can take **24–48 hours of waiting** for that verification
+> before you can create your first app listing. If you're tight on time, do
+> this step now and come back when verification clears. If verification is
+> already done (or you're an existing developer), we continue immediately.
+
+Walk through:
+
+1. Open [play.google.com/console/signup](https://play.google.com/console/signup).
+2. Choose account type: **Personal** or **Organization** (organization
+   requires DUNS number — flag this gotcha; most solo devs pick personal).
+3. Pay the $25.
+4. Upload ID for verification.
+5. **STOP.** Wait for verification email. Do not continue until it arrives.
+
+## Step 5 — Google Play app listing
+
+After verification, in Play Console:
+
+1. **All apps** → **Create app**.
+2. App name (this is the user-visible app name).
+3. Default language, App / Game, Free / Paid (irreversible after the first
+   paid sale, so confirm).
+4. Declarations (developer policies, etc.).
+
+Now fill the **policy landmine** before attempting any upload. Play Console
+blocks production releases until ALL of these are green:
+
+- **Privacy policy URL** — must be a public URL. If the user doesn't have
+  one, recommend they generate via a privacy-policy generator + host on
+  GitHub Pages or similar.
+- **Target audience** — Setup → Target audience.
+- **Data safety form** — Setup → App content → Data safety. Long
+  questionnaire; tell the user to set aside ~30 min for first pass.
+- **Content rating questionnaire** — Setup → App content → Content rating.
+- **App access** — declare if behind login.
+- **News app declaration** — required even if no.
+- **Government apps declaration** — required even if no.
+- **Advertising ID declaration** — required.
+
+Tell the user: *"all of these are one-time setup, but the Data safety form
+will burn 30 minutes. Set aside the time now or your first publish will
+block."*
+
+## Step 6 — Play Console signing setup
+
+Two paths, irreversible choice:
+
+- **Google-managed Play App Signing (recommended).** Upload your release keystore (or generate a new one via Play Console). Google holds the production signing key; you hold an upload key. Recovers if your local key is lost.
+- **Self-managed signing.** You hold the production signing key. If you lose it, your app is unrecoverable on Play Store.
+
+For 99% of teams, recommend Play App Signing. Walkthrough is in **Setup → App
+integrity → App signing**.
+
+## Step 7 — First manual AAB upload (the unblocker)
+
+**Play Console rejects API uploads until at least one AAB has been manually
+uploaded through the web UI**, even if all the API permissions are correct.
+This is the single most common "why doesn't my publish task work" gotcha.
+
+Build a signed AAB locally:
+```bash
+./gradlew :app:bundleRelease
+ls -la app/build/outputs/bundle/release/app-release.aab
+```
+
+Upload via Play Console:
+1. **Production** (left sidebar, under Release).
+2. **Create new release**.
+3. Drag the AAB in.
+4. Set release name (defaults to `versionName`).
+5. Add release notes (per locale; English is the floor).
+6. **Save as draft** (NOT Review release — we just want the upload to register).
+
+This single manual upload unlocks API uploads forever for this app.
+
+## Step 8 — Play Console API access (the wiring)
+
+This is the dance that connects the CLI to Play Console. Three subsystems
+have to agree.
+
+### 8a — Enable the API in Google Cloud Console
+
+1. Open [console.cloud.google.com](https://console.cloud.google.com).
+2. The Cloud project linked to your Play Console listing should auto-appear in the project picker. (If not, Play Console → Setup → API access shows the linked project.)
+3. **APIs & Services → Library** → search for **Google Play Developer API** → **Enable**.
+
+### 8b — Create a service account
+
+Still in Cloud Console:
+
+1. **IAM & Admin → Service accounts → Create service account**.
+2. Name it descriptively (e.g. `play-publisher-<appname>`).
+3. Skip the optional role assignment (we grant role via Play Console, not here).
+4. Click into the new service account → **Keys → Add key → Create new key → JSON**. Download.
+5. Save the JSON as `<your-app>-play-publisher.json` in the project root. **Add to `.gitignore`**.
+
+### 8c — Grant the service account access in Play Console
+
+Back in Play Console:
+
+1. **Users and permissions → Invite new users**.
+2. Email = the service account email (looks like `play-publisher-X@<project>.iam.gserviceaccount.com` — copy from the Cloud Console service account detail page).
+3. Permissions tab → set **App permissions**:
+   - Select your app
+   - Grant: **Release to production, exclude devices, and use Play App Signing** + **Release apps to testing tracks** + **Manage testing track access**
+4. Send invite. The service account auto-accepts (no email click-through needed).
+
+### 8d — Wire the `triplet/play` Gradle plugin
+
+- **Root `build.gradle`**:
+  ```gradle
+  classpath 'com.github.triplet.gradle:play-publisher:3.12.1'
+  ```
+- **App `build.gradle`** — `plugins { ... }`:
+  ```gradle
+  id 'com.github.triplet.play'
+  ```
+- Top-level `play { ... }` config (disabled by default for safety):
+  ```gradle
+  play {
+      enabled.set(false)
+      defaultToAppBundles.set(true)
+      track.set('internal')
+      resolutionStrategy.set(
+          com.github.triplet.gradle.androidpublisher.ResolutionStrategy.AUTO
+      )
+  }
+  ```
+- **Inside `android { ... }`**, add the per-flavor (or per-buildType) opt-in with the **DRAFT guard**:
+  ```gradle
+  playConfigs {
+      production {
+          enabled.set(true)
+          serviceAccountCredentials.set(file('../<your-app>-play-publisher.json'))
+          track.set('production')
+          releaseStatus.set(
+              com.github.triplet.gradle.androidpublisher.ReleaseStatus.DRAFT
+          )
+      }
+  }
+  ```
+
+The `DRAFT` line is non-negotiable. It means uploads create a draft on the
+Play listing but DO NOT submit for Google review until a human clicks "Send
+for review" in the Console UI. This is the same human-gated safety the
+showcase talk demos. Never set this to `COMPLETED` without explicit user
+confirmation — `COMPLETED` auto-publishes to real users.
+
+Verify:
+```bash
+./gradlew :app:bundleProductionRelease :app:publishProductionReleaseBundle
+```
+
+Expected: BUILD SUCCESSFUL, a `> Task :app:publishProductionReleaseBundle` line, and a new DRAFT row in Play Console → Production → Releases. If you see `403 the caller does not have permission`, the service account email isn't granted on the app in Play Console; revisit Step 8c.
+
+## Step 9 — Wire `.cursor/rules/` for the new project
+
+This is the step that makes the agentic delivery work:
+
+1. Copy `MDRTAcademy/.cursor/rules/android-project.mdc` into the new project at `.cursor/rules/<new-project-name>.mdc`.
+2. Update package ids per flavor (replace `com.mdrt.mdrtacademy.*` with the new ones).
+3. Update Gradle task names if flavors differ (e.g. if there's no `qa` flavor, use whatever the project actually has).
+4. Update credential file names (replace `mdrtacademy-qa-1db5bc700e4e.json` with the new Play API JSON filename from Step 8b).
+5. Update the codebase-orientation section (network module path, model path, etc.) to match the new project's structure.
+6. Update the BaseActivity / edge-to-edge gotcha section — remove if not applicable to the new project, or update if there's an equivalent extension point.
+
+Optionally also copy:
+- `android-project-onboarding.mdc` — verbatim, only changes are the project name and credential filenames
+- `android-project-bootstrap.mdc` — this file. Keeping it in the new project means the next person doing this on a YET ANOTHER project has the playbook.
+
+## Step 10 — Smoke-test the full agentic loop
+
+Open Cursor in the new project. Verify the rule is loaded (the agent should
+acknowledge knowing the package id, env vars, etc. on the first message).
+
+Then test the three-option menu:
+> Ship a build to my testers.
+
+The agent should present the 3 options (run / give command / GUI). Pick
+option 1. Watch it run `assembleRelease` + `appDistributionUploadRelease`.
+Confirm the tester email arrives in your inbox within ~1 min.
+
+If that works end-to-end, **the bootstrap is done**. The new project now has
+the same agentic CLI delivery capability that's demonstrated in the showcase
+talk.
+
+## What you've actually built (recap for the user)
+
+After all 10 steps, the new project has:
+
+- A Firebase project with App Distribution + (optionally) Crashlytics
+- A Google Play Console listing with all policy declarations done + signing set up
+- A Cloud service account wired to Play Console with API access
+- Gradle plugins wired for both Firebase distribution and Play publish
+- A DRAFT-only safety guard on production publishes
+- A project rule the agent reads on every chat so it knows the conventions
+
+That's the full delivery surface. From this point on, every release is one
+prompt — exactly the P3 claim from the talk.
+
+## Common bootstrap failures (recognize these)
+
+- **`google-services.json` not found at compile** → file is in the wrong place. Must be at `app/google-services.json`, not project root.
+- **`No matching variant ... compatible with Java 8`** → `JAVA_HOME` not set. See the main project rule.
+- **App Distribution upload says "App ID is required" or "App ID does not match"** → the `appId` in the firebaseAppDistribution block must be the `mobilesdk_app_id` from `google-services.json` (NOT the Firebase project ID, NOT the package name).
+- **Play publish fails with `403 the caller does not have permission`** → service account isn't granted on the app in Play Console. Step 8c.
+- **Play publish fails with `Package not found: <id>` on first run** → you haven't done the manual first-AAB upload (Step 7). Do that, then retry.
+- **Play publish fails with `Version code N has already been used`** → the `resolutionStrategy.AUTO` in the `play { ... }` block should auto-bump. If it's not set, set it; if it is set and still failing, the user already has a release in Play with that exact code — manually bump `versionCode` by 1 in `app/build.gradle`.
+- **`The user is not registered for app integrity`** → the Play Console signing setup (Step 6) wasn't completed. Finish it.

@@ -1,0 +1,201 @@
+---
+description: Core behavior rules for AI agents working on this iOS project
+alwaysApply: true
+---
+
+# Agent Behavior Rules
+
+## CLI-First Mandate
+- **ALWAYS use CLI tools instead of telling the user to open Xcode**
+- Use `xcodebuild` for builds, tests, archives, and scheme introspection
+- Use `xcrun simctl` for simulator management (boot, install, launch, screenshot, deep link, push)
+- Use `fastlane` for distribution (Firebase App Distribution, TestFlight, App Store)
+- Use `agvtool` / `PlistBuddy` for version bumps and plist edits
+- Use `swiftgen` to regenerate localized strings after `.strings` file changes
+- Use `xcrun ibtool` to validate storyboards/xibs
+- Only mention the Xcode GUI when the task genuinely requires it (visual Interface Builder layout editing, interactive debugger / step-through, Instruments profiling UI)
+
+## When Xcode GUI Is Unavoidable
+- Don't just say "open Xcode" — provide **step-by-step instructions** with exact menu paths, pane names, inspector tabs, and what to look for
+- Example: "In Xcode, open `Main.storyboard`, select the view controller with identifier `TabBarController` in the Document Outline (left panel), then in the Attributes Inspector (right panel, slider icon) change..."
+- Assume the user has minimal Xcode experience
+
+## Required environment
+Unlike Android, iOS tooling mostly lives inside the Xcode bundle and doesn't require explicit env vars. Verify these before any build:
+
+```bash
+xcodebuild -version          # Xcode >= 15.4
+xcrun simctl list devices    # at least one runtime installed
+fastlane --version           # Fastlane accessible
+swiftgen --version           # SwiftGen installed (brew install swiftgen)
+```
+
+Common failure when env is wrong:
+- **`xcode-select: error: no developer tools`** → `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
+- **`xcrun: error: unable to find utility`** → same fix as above
+- **Multiple Xcode versions installed** → wrong one selected. `xcode-select -p` shows current; switch with `-s`.
+
+## Search Before You Write
+- Always search existing code before generating new files or patterns
+- Check `Services/NetworkService+<Feature>.swift` for existing endpoints
+- Check `Models/` for existing model definitions
+- Check `Supporting Files/Constants.swift` for identifiers, URLs, keys
+- Check `Localized Strings/Strings+Generated.swift` for existing string keys
+- Check `View Controllers/` for existing screens before creating new ones
+- Check `Storyboards/` and `Views/Xibs/` for existing UI layouts
+
+## Build Verification
+After making Swift / XIB / Storyboard changes, verify the build compiles:
+
+```bash
+xcodebuild -project MDRTAcademy/MDRTAcademy.xcodeproj \
+  -scheme "QA - English" \
+  -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+  build 2>&1 | tail -5
+```
+
+- After modifying `.strings` files, regenerate with `swiftgen`
+- After layout changes, `xcrun ibtool --validate <storyboard-path>` catches broken outlets
+
+## Release request behavior (Firebase QA, TestFlight, App Store)
+
+When the user asks for a release — any of: *"ship to QA"*, *"release to
+Firebase"*, *"distribute to testers"*, *"push to TestFlight"*, *"send to
+App Store"*, *"deploy"*, or similar — **do not just execute it**. Use the
+AskQuestion tool to present these three options:
+
+**Question prompt:** "How would you like to handle this release?"
+
+**Options:**
+1. **Do it yourself** (id: `agent_executes`) — I run the fastlane lane here, monitor the output, report success/failure.
+2. **Give me the command** (id: `give_command`) — I show you the exact command + prerequisites, you paste and run.
+3. **I'll do it myself on the GUI, guide me** (id: `gui_guide`) — I walk you step-by-step through App Store Connect / Firebase Console with exact menu paths.
+
+Then respond based on the choice:
+
+### If option 1 — "Do it yourself" (agent_executes)
+- Confirm prerequisites: signing cert in keychain, correct branch, current version number.
+- Run the appropriate lane:
+  - Firebase QA: `cd MDRTAcademy && fastlane ios qa`
+  - Firebase PreProd: `cd MDRTAcademy && fastlane ios preprod`
+  - TestFlight / App Store: `cd MDRTAcademy && fastlane ios appstore`
+- After completion, report: version/build shipped, where it landed, what's left for a human.
+- **Always remind:** TestFlight upload does NOT submit for review — a human opens App Store Connect and clicks "Submit for Review."
+
+### If option 2 — "Give me the command" (give_command)
+Show a ready-to-paste block with pre-flight checks:
+
+```bash
+# Pre-flight: confirm correct branch
+git status
+
+# Release to QA via Firebase App Distribution
+cd MDRTAcademy && fastlane ios qa
+
+# Expected: "fastlane.tools finished successfully"
+# After: testers in LPL-iOS group get a Firebase notification
+```
+
+List what success looks like, what to do next, and offer to verify output.
+
+### If option 3 — "GUI guide" (gui_guide)
+Provide step-by-step with exact menu paths:
+
+**For App Store Connect (TestFlight / App Store release):**
+1. Open https://appstoreconnect.apple.com
+2. Select "MDRT Academy" under My Apps
+3. Click "TestFlight" tab
+4. Find the build (version X.X.X, build YYYY.MMDD.HHMMSS) — processing takes 15-30 min
+5. For external testers: click build → Manage → add group → Submit for Review
+6. For App Store: click "App Store" tab → select version → choose build → Submit for Review
+
+**For Firebase Console (QA / PreProd):**
+1. Open https://console.firebase.google.com
+2. Select the MDRT Academy project
+3. App Distribution → Releases
+4. Upload the .ipa from `MDRTAcademy/output/`
+5. Add release notes, select test group (LPL-iOS), click Distribute
+
+### Exception: never skip the menu
+Even if the user's prompt is unambiguous (*"just ship to QA"*), present the three options first. It's a 5-second beat that enforces a deliberate-choice gate for operations that burn build numbers and notify testers.
+
+## Onboarding new developers / bootstrapping new projects
+
+Two companion rules cover setup scenarios:
+
+- **Joining the existing team** (Fastlane + App Store Connect already configured,
+  user just needs local toolchain + credentials): point them at
+  `.cursor/rules/ios-project-onboarding.mdc`. Triggers on *"how do I set this up"*,
+  *"first time on this repo"*, *"can't build"*, *"onboard me"*.
+- **Bootstrapping a brand-new iOS project** (no Apple Developer account yet,
+  no Fastlane, needs signing + distribution wired from scratch): point them at
+  `.cursor/rules/ios-project-bootstrap.mdc`. Triggers on *"new iOS project"*,
+  *"setting up Fastlane"*, *"first time publishing to App Store"*, *"replicate
+  this delivery setup in another repo"*.
+
+If unsure which applies, ask: *"Are you joining an existing team's project
+that already has Fastlane + signing configured, or are you starting from a
+blank iOS project with no distribution pipeline yet?"*
+
+## Delivery pipeline guardrails
+- **TestFlight upload is NOT a release.** `fastlane ios appstore` uploads to TestFlight with `skip_waiting_for_build_processing: true`. A human must open App Store Connect and Submit for Review. **Never** add auto-submit behavior without explicit user permission.
+- **Do NOT clear derived data** — it wipes the SPM cache, and the private EightBitVideo dependency can't be re-fetched from CLI without manual re-cloning.
+- **Always use `Release - {Env}` schemes for distribution** — debug schemes (`QA - English`, etc.) use wrong archive build configurations.
+- Required credential/config files (verify before any release):
+  - `fastlane/config.yml` — Firebase CLI token, app-specific password, scheme names
+  - `fastlane/Appfile` — Apple ID, team ID, per-lane bundle IDs
+  - Distribution cert in macOS Keychain
+  - Provisioning profiles in `~/Library/MobileDevice/Provisioning Profiles/`
+- If any are missing or expired, **stop and tell the user** rather than improvising.
+
+## App environments and bundle IDs
+
+| Environment | Scheme (distribution) | Scheme (debug) | Bundle ID |
+|---|---|---|---|
+| QA | `Release - QA` | `QA - English` | `com.mdrt.MDRTAcademy-QA` |
+| PreProd | `Release - PreProd` | `PreProd - English` | `com.mdrt.MDRTAcademy-PreProduction` |
+| Staging | `Release - Staging` | `Staging - English` | `com.mdrt.MDRTAcademy-Staging` |
+| Production | `Release - Production` | `Production - English` | `com.mdrt.MDRTAcademy` |
+
+QA is the default for everyday work. Always confirm which environment the user means before distributing.
+
+## On-device interaction (the agent's "browser" for mobile)
+- Boot simulator: `xcrun simctl boot "iPhone 16"`
+- Install: `xcrun simctl install booted path/to/MDRTAcademy.app`
+- Launch: `xcrun simctl launch booted com.mdrt.MDRTAcademy-QA`
+- Force-stop: `xcrun simctl terminate booted com.mdrt.MDRTAcademy-QA`
+- Screenshot: `xcrun simctl io booted screenshot /tmp/<name>.png`
+- Deep link: `xcrun simctl openurl booted "yourscheme://goals/explore"`
+- Push notification: `xcrun simctl push booted com.mdrt.MDRTAcademy-QA payload.apns`
+- Toggle appearance: `xcrun simctl ui booted appearance dark` / `light`
+- Status bar override: `xcrun simctl status_bar booted override --time "9:41"`
+
+After taking a screenshot, **read it back into the chat as an artifact** so the user can see what the simulator actually rendered.
+
+## User Context
+- The primary developer is a **Ruby on Rails / web backend developer** with minimal iOS / Swift experience
+- Explain iOS / Swift / UIKit concepts using Rails / web analogies when helpful
+- Be explicit about where files go and why — don't assume familiarity with iOS project conventions
+- When explaining UIKit patterns, relate to MVC (which Rails devs know well):
+  - `UIViewController` = Rails Controller (with view merged in)
+  - Storyboard / XIB = ERB / HTML view template (declarative layout)
+  - Model struct/class = ActiveRecord model (but without DB persistence — just shape)
+  - `NetworkService` = HTTP client / API wrapper (like Faraday / HTTParty)
+  - `UserDefaults` = session / cookies (small key-value, on-device, app-scoped)
+  - `NotificationCenter` = pub/sub / `ActiveSupport::Notifications`
+  - `Info.plist` = `config/application.rb` + `config/credentials.yml.enc` (app-wide config)
+  - `Storyboard segue` = a route (you "navigate" by triggering a segue the way you'd `redirect_to`)
+  - SPM (Swift Package Manager) = Bundler (dependency resolution + lock file)
+  - `fastlane` = Capistrano + CI pipeline in one (build → sign → upload → notify)
+  - `L10n.Section.key` = `t('section.key')` i18n lookups
+
+## Common gotchas (recognize these failure modes)
+- **`xcode-select` pointing at wrong Xcode** → `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`. Symptoms: can't find `simctl`, wrong SDK versions.
+- **`AssetCatalogSimulatorAgent` crash** → Xcode version incompatible with macOS. Update Xcode.
+- **`YAML aliases` error in Ruby 3.3+** → Fixed in `configuration.rb` with `aliases: true`. If it resurfaces, the user upgraded Ruby.
+- **`LANE_NAME` nil error** → Fixed in `configuration.rb` — newer Fastlane passes args differently.
+- **Exit code 74 + `fatalError`** → Usually EightBitVideo private repo fetch failing. Ensure SPM cache exists and derived data wasn't cleared.
+- **`No signing certificate "iOS Distribution" found`** → Distribution cert not in keychain. Fix: `fastlane cert --development false` or Xcode > Settings > Accounts > Manage Certificates.
+- **`Code Signing Error: Provisioning profile doesn't include signing certificate`** → Profile was generated with a different cert. Regenerate: `fastlane sigh --adhoc --force`.
+- **New tester can't install ad-hoc build** → Their device UDID isn't in the provisioning profile. Follow the add-tester flow in the onboarding rule.

@@ -1,0 +1,257 @@
+---
+description: Walks a new developer through one-time setup of an EXISTING configured Android project from a blank macOS install — JDK, Android SDK, AVD, scrcpy, shell env vars, credential files, and a smoke-test build. Assumes Firebase project + Play Console listing already exist; user just needs to acquire credentials. Use when the user says they're joining the team, setting up the project for the first time, can't build at all, asks "what do I need to install", or asks to be onboarded.
+alwaysApply: false
+---
+
+# Onboarding a new developer to this Android project
+
+This rule is for the **existing-project** case — joining a team where
+Firebase, Play Console, signing keystore, and tester groups are all already
+configured upstream. The user just needs to install the toolchain locally
+and acquire the credential files.
+
+If the user is instead starting a **brand-new** project from scratch (no
+Firebase yet, no Play Console listing yet, needs to wire the plugins for the
+first time), point them at `.cursor/rules/android-project-bootstrap.mdc`
+instead. That walkthrough creates the Firebase project, registers the
+Android app, sets up App Distribution + Play Console + API access, and wires
+the Gradle plugins from zero.
+
+You are guiding a human through one-time setup. The audience: typically a
+**web / Rails developer with minimal Android experience** (see "User Context"
+in `.cursor/rules/android-project.mdc` for the analogy vocabulary to use when
+explaining concepts).
+
+## Operating principles for this walkthrough
+
+- **Don't dump the whole list at once.** Walk step-by-step. Check at each
+  step whether the thing is already installed / set up; skip if so.
+- **Confirm OS first.** This guide assumes macOS. If the user is on Linux or
+  Windows, the package-manager commands change; tell them you can adapt but
+  the structure of the steps is the same.
+- **One thing at a time.** Wait for the user to confirm each step before
+  moving to the next. Avoid "run this 12-line script" — that's hard to
+  recover from when something errors mid-way.
+- **Show what success looks like.** After each install, run a verification
+  command (`which X`, `X --version`, `X --help`) and tell the user what they
+  should see. Don't move on until you and they both see it.
+- **For credential files, distinguish solo-dev from team-dev.** On a real
+  team, secret files come from a project owner via 1Password / a secure
+  channel — never ask the user to generate them from scratch unless they
+  confirm they own the Firebase / Play Console accounts.
+
+## The walkthrough, in order
+
+### Step 0 — Where you are
+
+Confirm with the user:
+- They're on macOS
+- They've cloned the repo (`MDRTAcademy/` directory exists, contains `build.gradle`)
+- They have **admin access on the machine** (will need `sudo` for some installs)
+- They're using zsh (default macOS shell) or bash — needed to know which rc file to edit later
+
+If any of the above is no, stop and resolve before continuing.
+
+### Step 1 — Audit what's already installed
+
+Run these checks in one go and report which are missing:
+
+```bash
+echo "=== Checking installed tools ==="
+which java && java -version 2>&1 | head -1 || echo "MISSING: java"
+which adb && adb --version | head -1 || echo "MISSING: adb"
+which sdkmanager || echo "MISSING: sdkmanager"
+which emulator || echo "MISSING: emulator"
+which scrcpy && scrcpy --version | head -1 || echo "MISSING: scrcpy"
+which brew && brew --version | head -1 || echo "MISSING: brew"
+echo "JAVA_HOME = ${JAVA_HOME:-NOT SET}"
+echo "ANDROID_HOME = ${ANDROID_HOME:-NOT SET}"
+```
+
+Based on the output, route to Step 2 (machine tools) or Step 3 (env vars) or
+Step 4 (credentials) as needed. **If everything is already installed**, skip
+straight to Step 5 (smoke build).
+
+### Step 2 — Install missing machine tools
+
+Walk through these one at a time. Skip any that step 1 already confirmed
+installed.
+
+**Homebrew** (only if missing — most macOS devs already have it):
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+**JDK 17.** Two valid sources:
+- *Preferred if Android Studio is already on disk:* use its bundled JBR (zero install, just point JAVA_HOME at `/Applications/Android Studio.app/Contents/jbr/Contents/Home`).
+- *Otherwise:* `brew install openjdk@17` and follow the post-install instructions to symlink so `java` is on PATH.
+
+Verify: `java -version` should print `openjdk version "17.x.x"` or similar.
+
+**Android command-line tools + platform-tools.** The 200 MB CLI install, NOT the 4 GB Android Studio install:
+```bash
+brew install --cask android-platform-tools  # just adb + fastboot
+brew install --cask android-commandlinetools  # sdkmanager + avdmanager
+```
+
+Verify: `adb --version` and `sdkmanager --version` both print versions.
+
+**scrcpy** (for mirroring the emulator into a normal window during demos):
+```bash
+brew install scrcpy
+```
+
+Verify: `scrcpy --version` prints a version.
+
+**Android SDK packages.** With `sdkmanager` installed, fetch the platform + system image we use in this project:
+```bash
+sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "system-images;android-36;google_apis;arm64-v8a" "emulator" "platform-tools"
+```
+
+(First run will prompt to accept Google licenses — `sdkmanager --licenses` accepts them all in one go.)
+
+Verify: `sdkmanager --list_installed | head -20` shows the packages.
+
+### Step 3 — Shell env vars (the #1 cause of mystery failures)
+
+This step has its own section in the main project rule for a reason. Set the
+env vars in the user's shell rc file. Detect shell first (`echo $SHELL`):
+
+For zsh, append to `~/.zshrc`:
+```bash
+cat >> ~/.zshrc <<'EOF'
+
+# Android dev (MDRT Academy and friends)
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME=~/Library/Android/sdk
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+EOF
+```
+
+(If the user installed JDK via brew instead of using Android Studio's JBR,
+swap `JAVA_HOME` to `$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home`.
+Confirm with `echo $JAVA_HOME` after sourcing.)
+
+Then have the user reload: `source ~/.zshrc` (or open a fresh terminal).
+
+Verify, in the fresh shell:
+```bash
+echo "JAVA_HOME = $JAVA_HOME"
+echo "ANDROID_HOME = $ANDROID_HOME"
+which adb && which emulator && which sdkmanager
+```
+
+All four should print real paths under `$ANDROID_HOME` or system-wide. If
+anything still says NOT SET, the rc file didn't get re-sourced — open a fresh
+terminal and try again.
+
+### Step 4 — Credential files (the per-project ceremony)
+
+The repo's `.gitignore` excludes these — they're never committed. The user
+needs them in `MDRTAcademy/`:
+
+| File | What it is | How to get it |
+|---|---|---|
+| `firebase-service-account.json` | Firebase App Distribution upload | If on a team: ask the project owner (lives in 1Password). If solo: Firebase Console → Project settings → Service accounts → Generate new private key. Rename to this exact filename. |
+| `google-services.json` | Firebase client config | Firebase Console → Project settings → Your apps → click the Android app → Download `google-services.json`. |
+| `mdrtacademy-qa-1db5bc700e4e.json` | Google Play API service account | If on a team: ask the project owner. If solo: Cloud Console → IAM → Service accounts → create / find the one linked in Play Console → API access → Download JSON key. Filename must match what's referenced in `app/build.gradle` line 214 — verify and adjust if rotated. |
+| `keystore.properties` | Release signing passwords | If on a team: ask the project owner. If solo: see below for first-time keystore creation. |
+| `keystores/mdrtacadedmy-release` | Release signing keystore | Same as above. |
+
+If the user is solo and needs to generate a release keystore from scratch
+(this is rare — usually inherited):
+
+```bash
+cd MDRTAcademy
+mkdir -p keystores
+keytool -genkey -v -keystore keystores/mdrtacadedmy-release \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -alias mdrtacademy
+# Then create keystore.properties with:
+# storeFile=keystores/mdrtacadedmy-release
+# storePassword=<the password you just set>
+# keyAlias=mdrtacademy
+# keyPassword=<same as storePassword unless you set different>
+```
+
+**Important:** if the user is generating a new keystore, the Play Store will
+treat any future build as a *different app* unless they restore the original.
+This is irreversible for any app that's already published. **Stop and confirm
+with the user** that they're not about to lock themselves out of their own
+production app.
+
+Verify all files present:
+```bash
+cd MDRTAcademy
+ls -la firebase-service-account.json google-services.json mdrtacademy-*.json keystore.properties keystores/
+```
+
+### Step 5 — Create an AVD (the emulator instance)
+
+```bash
+avdmanager create avd \
+  -n Medium_Phone_API_36 \
+  -k "system-images;android-36;google_apis;arm64-v8a" \
+  -d "medium_phone"
+```
+
+(`-d "medium_phone"` picks the device profile; other valid profiles via `avdmanager list device`.)
+
+Verify: `emulator -list-avds` should show `Medium_Phone_API_36`.
+
+Boot it once to confirm it works:
+```bash
+$ANDROID_HOME/emulator/emulator -avd Medium_Phone_API_36 -dns-server 8.8.8.8,8.8.4.4 &
+adb wait-for-device
+until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; do sleep 1; done
+echo "Emulator is up."
+```
+
+If `adb devices` shows the emulator as `online`, you're good.
+
+### Step 6 — Smoke build
+
+Now verify the whole chain works end-to-end:
+
+```bash
+cd MDRTAcademy
+./gradlew :app:assembleQaDebug
+```
+
+Expected: ~1-2 min on first run, `BUILD SUCCESSFUL` at the end.
+
+If it fails, recovery in order:
+1. **"No matching variant ... compatible with Java 8"** → `JAVA_HOME` not exported in this shell. See main rule. `./gradlew --stop`, re-export, retry.
+2. **"SDK location not found"** → `ANDROID_HOME` not exported. Same fix.
+3. **"keystore not found" / "storeFile not specified"** → `keystore.properties` is missing or path is wrong. See Step 4.
+4. **Network / dependency download failures** → bad WiFi or proxy issues; retry once, then check `gradle.properties` for `org.gradle.jvmargs` proxy settings.
+
+Then install + launch:
+```bash
+adb install -r app/build/outputs/apk/qa/debug/app-qa-debug.apk
+adb shell am force-stop com.mdrt.mdrtacademy.qa
+adb shell monkey -p com.mdrt.mdrtacademy.qa -c android.intent.category.LAUNCHER 1
+```
+
+App should boot on the emulator. If yes — onboarding done.
+
+### Step 7 — Smoke-test the agent-Android loop
+
+Optional but recommended: have the user paste a trivial agent prompt to make
+sure the whole loop works in *their* Cursor session, not just yours:
+
+> Take a screenshot of the emulator and tell me what app is on screen.
+
+The agent (with the main project rule loaded) should run `adb shell
+screencap`, pull the PNG, drop it into the chat, and identify the MDRT
+Academy login screen (or whatever is showing).
+
+If that works, the user is fully set up.
+
+## What to point them at next
+
+- Main project rule (`.cursor/rules/android-project.mdc`) — explains conventions, codebase orientation, on-device interaction vocabulary, release-three-options behavior, common gotchas.
+- `docs/agentic-showcase.md` — runbook for the live talk that demos this whole workflow end-to-end.
+- `docs/agentic-showcase-edge-to-edge-deepdive.md` — a real worked example (the edge-to-edge bug fix in 4 phases) showing the agent + human loop on a real bug.
+
+Tell the user: "From here on, your interaction is just normal Cursor chats. The agent already knows the project from the main rule. Ask it to fix bugs, install builds, take screenshots, ship to QA — it'll take it from there."

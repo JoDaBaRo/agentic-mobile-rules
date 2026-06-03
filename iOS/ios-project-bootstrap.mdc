@@ -1,0 +1,452 @@
+---
+description: Walks a developer through bootstrapping a BRAND-NEW iOS project for agentic CLI delivery — Apple Developer Program enrollment, App Store Connect listing, provisioning profiles, Fastlane setup from scratch, Firebase App Distribution, TestFlight + App Store first upload. Use when the user says they're starting a new iOS project from scratch, have no Apple Developer account yet, no Fastlane yet, asks how to set up iOS distribution for a fresh app, or asks to replicate the agentic delivery setup in a different iOS repo.
+alwaysApply: false
+---
+
+# Bootstrapping a new iOS project for agentic CLI delivery
+
+This rule is for the **brand-new-project** case. If the user is joining an
+already-configured project (just needs credentials + machine setup), point
+them at `.cursor/rules/ios-project-onboarding.mdc` instead.
+
+The end state after this walkthrough: the user's new project has a working
+Fastlane + Firebase App Distribution + TestFlight delivery pipeline that an
+agent can drive via `fastlane ios <lane>` one-liners.
+
+## What you're signing up for (state this up front)
+
+Tell the user, before starting:
+
+> Realistic timeline: this is **~1 full afternoon of hands-on work**, plus
+> potentially **24–48 hours of waiting** for Apple's first TestFlight build
+> review. There's a **$99/year Apple Developer Program fee**. If you're doing
+> this for a client, get the client's Apple ID on the Developer account or
+> you'll own the signing identity forever.
+>
+> Most of this is irreversible once it's live (bundle ID, team association,
+> App Store listing), so I'll flag the gates as we go.
+
+## Operating principles for this walkthrough
+
+- **Sequential, not parallel.** Apple Developer Program must exist before
+  provisioning profiles. Profiles must exist before Fastlane can sign.
+  Fastlane must be configured before distribution works.
+- **Confirm at every gate.** Before each "create a new thing in a Console"
+  step, recap what's about to happen and confirm.
+- **Flag costs.** $99/year Developer fee, potential $299/year for
+  organizations (requires DUNS number).
+- **Save credentials immediately.** Every cert/key/profile you generate,
+  immediately tell the user to back it up (1Password, team vault).
+- **Distinguish what's per-account from what's per-app.** The Apple Developer
+  account is per-organization (or per-individual). App IDs, profiles, and
+  App Store listings are per-app.
+
+## Prerequisites (Step 0)
+
+Before touching any console, confirm with the user:
+
+- They're on **macOS** (hard requirement)
+- They have an **Xcode project that builds locally** (`xcodebuild build`
+  succeeds for at least one scheme). If not — they need basic project setup
+  first, which is outside this rule's scope.
+- They have a **bundle identifier chosen** and set in their Xcode project
+  (e.g., `com.company.appname`). This is permanent once published.
+- They have an **Apple ID** they're willing to associate with the Developer
+  account.
+- They have a **credit card** ready ($99/year fee).
+
+## Step 1 — Apple Developer Program enrollment
+
+**This is the first gate.** Read aloud:
+
+> The Apple Developer Program costs **$99/year** (individuals) or
+> **$299/year** (organizations — requires a DUNS number which can take
+> 2-4 weeks to obtain). Enrollment approval is usually **24-48 hours** for
+> individuals, longer for organizations.
+>
+> If you're an individual developer, you can proceed now. If you need an
+> organization account, start the DUNS process first and come back.
+
+Walk through:
+
+1. Open https://developer.apple.com/programs/enroll/
+2. Sign in with the Apple ID that will own the account.
+3. Choose account type: **Individual** or **Organization**.
+4. Pay the $99/year fee.
+5. **STOP.** Wait for enrollment confirmation email (usually 24-48h for individuals).
+
+After enrollment is confirmed, the user can access:
+- https://developer.apple.com/account — certificates, identifiers, profiles
+- https://appstoreconnect.apple.com — app listings, TestFlight, App Store submissions
+
+## Step 2 — Register the App ID
+
+In Apple Developer portal:
+
+1. Open https://developer.apple.com/account/resources/identifiers/list
+2. Click "+" to register a new identifier.
+3. Choose "App IDs" → "App" (not "App Clip").
+4. Description: human-readable name (e.g., "My App - QA").
+5. Bundle ID: **Explicit** → enter the exact bundle ID from the Xcode project.
+6. Capabilities: enable what you need (Push Notifications, Associated Domains, etc.).
+7. Click "Register".
+
+**Repeat for each environment** if you use separate bundle IDs:
+- `com.company.appname` (production)
+- `com.company.appname-QA` (QA/testing)
+
+## Step 3 — Create signing certificates
+
+### Distribution certificate (for App Store + ad-hoc):
+
+```bash
+# Install Fastlane first if not already
+gem install fastlane
+
+# Generate distribution certificate
+fastlane cert --development false \
+  --username "your@appleid.com" \
+  --team_id "<your-team-id>"
+```
+
+Or via Xcode:
+1. Xcode → Settings → Accounts → select your team
+2. Click "Manage Certificates..."
+3. Click "+" → "Apple Distribution"
+
+Verify:
+```bash
+security find-identity -v -p codesigning | grep "Apple Distribution"
+```
+
+**IMPORTANT:** Each team can only have a limited number of distribution
+certificates. If one already exists (from another team member), get the
+`.p12` export from them rather than creating a new one. Creating a new one
+may revoke theirs.
+
+### Development certificate (for running on physical devices):
+
+```bash
+fastlane cert --development true \
+  --username "your@appleid.com" \
+  --team_id "<your-team-id>"
+```
+
+## Step 4 — Create provisioning profiles
+
+For ad-hoc distribution (Firebase App Distribution to testers):
+```bash
+fastlane sigh --adhoc \
+  --app_identifier "com.company.appname-QA" \
+  --team_id "<your-team-id>" \
+  --force
+```
+
+For App Store distribution (TestFlight + App Store):
+```bash
+fastlane sigh \
+  --app_identifier "com.company.appname" \
+  --team_id "<your-team-id>" \
+  --force
+```
+
+For development (running on physical devices):
+```bash
+fastlane sigh --development \
+  --app_identifier "com.company.appname-QA" \
+  --team_id "<your-team-id>" \
+  --force
+```
+
+Verify:
+```bash
+ls ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision
+```
+
+## Step 5 — Firebase project + App Distribution
+
+### 5a — Create Firebase project
+
+1. Open https://console.firebase.google.com
+2. Click "Add project" → name it (e.g., `MyApp` or `MyApp-QA`).
+3. Google Analytics: optional. Skip if unsure.
+4. Wait for creation (~30s).
+
+### 5b — Register the iOS app
+
+1. Project home → click the iOS icon to add an iOS app.
+2. **Bundle ID** = exact bundle ID from Xcode (e.g., `com.company.appname-QA`).
+3. **App nickname** = cosmetic, anything helpful.
+4. Download `GoogleService-Info.plist` when prompted.
+5. Add it to the Xcode project (drag into the project, ensure "Copy items if needed" is checked and the correct target is selected).
+
+### 5c — Enable App Distribution
+
+1. Firebase Console → left sidebar → **App Distribution** (under Release & Monitor).
+2. Click through the enable flow if prompted.
+3. **Testers and groups** tab → **Add group** → create a group (e.g., `qa-testers`).
+4. Add at least one tester email.
+
+### 5d — Create the upload service account
+
+For CLI-based uploads (what Fastlane will use):
+
+1. Firebase Console → Project Settings → **Service accounts** tab.
+2. Click "Generate new private key."
+3. Save the JSON securely. You'll reference it in Fastlane config later.
+
+**Alternative (simpler):** Use a Firebase CLI token instead:
+```bash
+firebase login:ci
+# Copy the printed token — you'll put it in config.yml
+```
+
+## Step 6 — Set up Fastlane from scratch
+
+### 6a — Initialize Fastlane
+
+```bash
+cd <your-project-root>
+fastlane init
+```
+
+Choose option 4 ("Manual setup") when prompted — we'll configure lanes manually.
+
+This creates:
+- `fastlane/Fastfile` — lane definitions (empty template)
+- `fastlane/Appfile` — Apple ID and team info
+
+### 6b — Configure Appfile
+
+Edit `fastlane/Appfile`:
+```ruby
+for_platform :ios do
+  apple_id "your@appleid.com"
+  team_name "Your Team Name"
+  team_id "<your-team-id>"
+
+  for_lane :qa do
+    app_identifier "com.company.appname-QA"
+  end
+
+  for_lane :appstore do
+    app_identifier "com.company.appname"
+  end
+end
+```
+
+### 6c — Install Firebase plugin
+
+```bash
+fastlane add_plugin firebase_app_distribution
+```
+
+This creates/updates `fastlane/Pluginfile`.
+
+### 6d — Create config.yml
+
+Create `fastlane/config.yml`:
+```yaml
+default: &default
+  team_id: "<your-team-id>"
+  app_name: 'YourApp'
+  build_target: 'YourApp'
+  scheme_name: 'YourApp'
+  app_specific_password: '<generate-at-appleid.apple.com>'
+  slack:
+    notify: false
+    url: ''
+    channel: ''
+  firebase: &firebase
+    cli_token: "<your-firebase-cli-token>"
+    test_groups:
+      - qa-testers
+
+qa:
+  <<: *default
+  scheme_name: 'Release - QA'
+  firebase:
+    <<: *firebase
+    app_id: '<firebase-app-id-from-console>'
+
+appstore:
+  <<: *default
+  scheme_name: 'Release - Production'
+  app_identifier: 'com.company.appname'
+```
+
+### 6e — Create Fastfile with lanes
+
+Create `fastlane/Fastfile`:
+```ruby
+platform :ios do
+  desc "Distribute QA build to Firebase"
+  lane :qa do
+    build_ios_app(
+      export_method: "ad-hoc",
+      scheme: "Release - QA",
+      export_team_id: "<your-team-id>",
+      xcargs: "-allowProvisioningUpdates"
+    )
+    firebase_app_distribution(
+      app: "<firebase-app-id>",
+      groups: "qa-testers",
+      firebase_cli_token: "<your-token>",
+      release_notes: "QA build"
+    )
+  end
+
+  desc "Build and upload to TestFlight"
+  lane :appstore do
+    build_ios_app(
+      export_method: "app-store",
+      scheme: "Release - Production",
+      export_team_id: "<your-team-id>",
+      xcargs: "-allowProvisioningUpdates"
+    )
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true
+    )
+  end
+end
+```
+
+### 6f — Generate app-specific password
+
+Required for TestFlight uploads:
+
+1. Go to https://appleid.apple.com
+2. Sign in → Security → App-Specific Passwords
+3. Generate one, label it "Fastlane"
+4. Put the password in `config.yml` under `app_specific_password`
+
+Set it as env var so Fastlane picks it up:
+```bash
+export FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+```
+
+(Or handle this in a configuration helper like the MDRT project does.)
+
+## Step 7 — App Store Connect listing
+
+**Gate check:** This creates a public listing. Confirm the user is ready.
+
+1. Open https://appstoreconnect.apple.com
+2. My Apps → "+" → New App
+3. Fill required fields:
+   - Platform: iOS
+   - Name: the user-visible app name
+   - Primary language
+   - Bundle ID: select from dropdown (registered in Step 2)
+   - SKU: unique internal identifier (often same as bundle ID reversed)
+4. Click "Create"
+
+Before you can submit ANY build for review, Apple requires:
+- **Privacy Policy URL** — must be a public URL
+- **App screenshots** — at least one set for the required device sizes
+- **App description** — at least a short one
+- **Category** — primary and optionally secondary
+- **Age rating** — questionnaire
+- **App Privacy (nutrition labels)** — what data you collect
+
+Tell the user: *"The metadata requirements will block your first TestFlight
+external-tester submission. Set aside 30-60 min to fill them out. Internal
+TestFlight testing (up to 100 team members) does NOT require this."*
+
+## Step 8 — First TestFlight upload (the unblocker)
+
+The first build uploaded to TestFlight triggers **Apple's Beta App Review**
+(24-48 hour wait). After this initial review, subsequent builds are usually
+available immediately for internal testers.
+
+```bash
+cd <your-project-root> && fastlane ios appstore
+```
+
+After upload:
+1. Go to App Store Connect → TestFlight tab
+2. Wait for "Processing" to complete (~15-30 min)
+3. Internal testers (up to 100 team members) can install immediately
+4. External testers require submitting for Beta App Review first
+
+**The safety guard:** `upload_to_testflight(skip_waiting_for_build_processing:
+true)` uploads but does NOT submit for review or distribute to any group.
+A human must:
+- Add the build to a tester group (internal or external)
+- For external: submit for Beta App Review
+- For App Store release: go to the App Store tab and submit for full review
+
+This is the iOS equivalent of Android's `releaseStatus.DRAFT` — the agent
+can ship to TestFlight, but cannot release to production without human
+intervention.
+
+## Step 9 — Verify the Firebase QA pipeline
+
+```bash
+cd <your-project-root> && fastlane ios qa
+```
+
+Expected: build succeeds, .ipa uploads to Firebase, testers in `qa-testers`
+group receive a notification email within ~1 minute.
+
+If it fails:
+- **"No signing certificate found"** → Step 3 wasn't completed
+- **"No provisioning profile found"** → Step 4 wasn't completed
+- **Firebase upload error** → check `cli_token` and `app_id` in config
+- **Build error** → the scheme name in config doesn't match Xcode
+
+## Step 10 — Wire `.cursor/rules/` for the new project
+
+This is what makes the agentic delivery work:
+
+1. Copy `ios-project.mdc` into the new project at `.cursor/rules/ios-project.mdc`
+2. Update bundle IDs (replace `com.mdrt.MDRTAcademy*` with your bundle IDs)
+3. Update scheme names to match your project's schemes
+4. Update fastlane lane references if you named them differently
+5. Update the codebase-orientation section for your project structure
+6. Remove MDRT-specific gotchas (EightBitVideo, etc.) and add your own
+
+Optionally also copy:
+- `ios-project-onboarding.mdc` — update credential paths and tool versions
+- `ios-project-bootstrap.mdc` — this file. Keep it so the next person bootstrapping a new project has the playbook.
+
+## Step 11 — Smoke-test the full agentic loop
+
+Open Cursor in the new project. Verify the rule is loaded:
+> What do you know about this project?
+
+The agent should recite back the bundle IDs, schemes, and fastlane lanes.
+
+Then test the three-option menu:
+> Ship a build to my testers.
+
+The agent should present the 3 options. Pick option 1. Watch it run
+`fastlane ios qa`. Confirm the tester email arrives.
+
+If that works end-to-end, **the bootstrap is done.**
+
+## What you've actually built (recap for the user)
+
+After all 11 steps, the new project has:
+
+- An Apple Developer Program account with registered App IDs
+- Distribution + development certificates in the local keychain
+- Provisioning profiles for ad-hoc (Firebase) and App Store distribution
+- A Firebase project with App Distribution + tester groups
+- Fastlane configured with `qa` and `appstore` lanes
+- An App Store Connect listing (metadata filled, ready for submissions)
+- A TestFlight pipeline where upload ≠ release (human-gated safety)
+- A project rule the agent reads on every chat so it knows conventions
+
+That's the full delivery surface. From this point on, every release is one
+prompt — exactly the P3 claim from the talk.
+
+## Common bootstrap failures
+
+- **"Your account does not have permission"** → Apple Developer enrollment isn't complete. Wait for confirmation email.
+- **"No matching provisioning profile"** → the bundle ID in Xcode doesn't match what's registered in Apple Developer portal. They must be identical, case-sensitive.
+- **"App ID is not available"** → someone already registered that bundle ID on another team. Choose a different one.
+- **TestFlight processing stuck** → builds can take up to 30 min to process. If longer, check App Store Connect for a "Missing Compliance" banner (requires answering the export compliance question).
+- **"Missing required icon"** → the Xcode asset catalog doesn't have a 1024x1024 App Store icon. Add it.
+- **Firebase upload returns "permission denied"** → CLI token expired. Regenerate with `firebase login:ci`.
+- **Beta App Review rejection** → usually metadata issues (missing privacy policy, crashy app). Fix and resubmit — subsequent reviews are faster.

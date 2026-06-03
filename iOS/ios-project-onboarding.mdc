@@ -1,0 +1,290 @@
+---
+description: Walks a new developer through one-time setup of an EXISTING configured iOS project from a blank macOS install — Xcode, Fastlane, SPM dependencies, code signing, simulator, and a smoke-test build. Assumes App Store Connect + Firebase + Fastlane are already configured upstream; user just needs local toolchain + credentials. Use when the user says they're joining the team, setting up the project for the first time, can't build, asks "what do I need to install", or asks to be onboarded.
+alwaysApply: false
+---
+
+# Onboarding a new developer to this iOS project
+
+This rule is for the **existing-project** case — joining a team where
+Fastlane, App Store Connect, Firebase App Distribution, signing certs,
+and tester groups are all already configured upstream. The user just needs
+to install the toolchain locally and acquire credentials.
+
+If the user is instead starting a **brand-new** project from scratch (no
+Apple Developer account, no Fastlane, no distribution pipeline), point them
+at `.cursor/rules/ios-project-bootstrap.mdc` instead.
+
+You are guiding a human through one-time setup. The audience: typically a
+**web / Rails developer with minimal iOS experience** (see "User Context"
+in `.cursor/rules/ios-project.mdc` for the analogy vocabulary to use when
+explaining concepts).
+
+## Operating principles for this walkthrough
+
+- **Don't dump the whole list at once.** Walk step-by-step. Check at each
+  step whether the thing is already installed / set up; skip if so.
+- **Confirm OS first.** This guide assumes macOS. iOS development requires
+  macOS — there is no Linux or Windows path. If the user is not on macOS,
+  stop and explain this is a hard requirement.
+- **One thing at a time.** Wait for the user to confirm each step before
+  moving to the next. Avoid monolithic scripts.
+- **Show what success looks like.** After each install, run a verification
+  command and tell the user what they should see.
+- **For credential files, distinguish solo-dev from team-dev.** On a real
+  team, secrets come from the project owner via 1Password / a secure channel.
+
+## The walkthrough, in order
+
+### Step 0 — Where you are
+
+Confirm with the user:
+- They're on macOS (hard requirement — no alternative for iOS dev)
+- They've cloned the repo (`MDRTAcademy/` directory exists with `.xcodeproj`)
+- They have admin access on the machine (needed for Xcode CLI tools)
+- They know their shell (zsh is macOS default since Catalina)
+
+If any is no, stop and resolve before continuing.
+
+### Step 1 — Audit what's already installed
+
+Run these checks in one go and report which are missing:
+
+```bash
+echo "=== Checking installed tools ==="
+xcode-select -p 2>/dev/null && echo "Xcode CLI: OK" || echo "MISSING: Xcode CLI tools"
+xcodebuild -version 2>/dev/null | head -1 || echo "MISSING: Xcode"
+xcrun simctl list runtimes 2>/dev/null | head -3 || echo "MISSING: Simulator runtimes"
+which fastlane && fastlane --version 2>/dev/null | head -1 || echo "MISSING: fastlane"
+which swiftgen && swiftgen --version 2>/dev/null || echo "MISSING: swiftgen"
+ruby --version || echo "MISSING: ruby"
+```
+
+Based on output, route to the appropriate step. **If everything is already
+installed**, skip straight to Step 5 (code signing).
+
+### Step 2 — Install Xcode + CLI tools
+
+**Xcode** (the full app, not just CLI tools — needed for simulator runtimes
+and the full SDK):
+
+Two paths:
+- **Mac App Store** — search "Xcode", install (~12 GB download, ~35 GB on disk after first launch)
+- **Developer portal** — https://developer.apple.com/download/applications/ (useful for specific versions)
+
+After Xcode is installed, set it as the active developer directory:
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+Launch Xcode once manually to accept the license and install additional components:
+```bash
+sudo xcodebuild -license accept
+xcodebuild -runFirstLaunch
+```
+
+Verify:
+```bash
+xcodebuild -version
+# Should print: Xcode 16.x (or whatever's current)
+# Build version XXXXX
+
+xcrun simctl list runtimes
+# Should show at least one iOS runtime (e.g., iOS 18.x)
+```
+
+### Step 3 — Install support tools
+
+**Homebrew** (skip if already installed):
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+**Fastlane:**
+```bash
+gem install fastlane
+# OR
+brew install fastlane
+```
+
+Verify: `fastlane --version` prints a version.
+
+**SwiftGen** (localized string codegen):
+```bash
+brew install swiftgen
+```
+
+Verify: `swiftgen --version` prints a version.
+
+**xcbeautify** (optional — pretty-prints xcodebuild output):
+```bash
+brew install xcbeautify
+```
+
+### Step 4 — SPM dependencies + private repos
+
+This project uses Swift Package Manager. Most dependencies resolve
+automatically on first build, but **EightBitVideo** is a private repo that
+requires manual setup:
+
+```bash
+# Clone the private video player repo (get access from team lead first)
+git clone git@github.com:<org>/video_player_ios.git /tmp/video_player_ios
+
+# Create a bare clone in the SPM cache
+git clone --bare /tmp/video_player_ios \
+  ~/Library/Caches/org.swift.swiftpm/repositories/EightBitVideo-42e8da59
+
+# Resolve all packages
+xcodebuild -project MDRTAcademy/MDRTAcademy.xcodeproj -resolvePackageDependencies
+```
+
+**CRITICAL:** After this step, NEVER clear derived data — it wipes the SPM
+cache and EightBitVideo can't be re-fetched from CLI without redoing this step.
+
+Verify: `xcodebuild -resolvePackageDependencies` exits with 0.
+
+### Step 5 — Code signing setup
+
+This is the step that's most different from any web dev flow. Think of it
+like SSH keys but more bureaucratic.
+
+#### 5a — Apple Developer account in Xcode (GUI required, one-time)
+
+This is the ONE step that genuinely requires the Xcode GUI:
+
+1. Open Xcode
+2. Menu: Xcode → Settings (Cmd+,)
+3. Click the "Accounts" tab
+4. Click "+" in the bottom-left
+5. Choose "Apple ID"
+6. Sign in with `jose.bayona@launchpadlab.com` (or whatever the team Apple ID is)
+7. The team "Million Dollar Round Table" should appear under the account
+
+This registers the signing identity in the local keychain. After this,
+CLI tools can access it.
+
+#### 5b — Distribution certificate
+
+Check if it's already in the keychain:
+```bash
+security find-identity -v -p codesigning | grep "Apple Distribution"
+```
+
+If it shows a valid cert — you're good. If not, generate one:
+```bash
+fastlane cert --development false \
+  --username "jose.bayona@launchpadlab.com" \
+  --team_id "6DMKJU6X25"
+```
+
+#### 5c — Provisioning profiles
+
+For QA (ad-hoc distribution):
+```bash
+fastlane sigh --adhoc \
+  --app_identifier "com.mdrt.MDRTAcademy-QA" \
+  --team_id "6DMKJU6X25" \
+  --force
+```
+
+For App Store:
+```bash
+fastlane sigh \
+  --app_identifier "com.mdrt.MDRTAcademy" \
+  --team_id "6DMKJU6X25" \
+  --force
+```
+
+Verify profiles exist:
+```bash
+ls ~/Library/MobileDevice/Provisioning\ Profiles/
+# Should show .mobileprovision files
+```
+
+### Step 6 — Fastlane configuration
+
+Fastlane is already configured in the repo. Verify the config is valid:
+
+```bash
+cd MDRTAcademy && fastlane install_plugins
+```
+
+Check that `config.yml` has valid tokens:
+- `firebase.cli_token` — if expired, regenerate with `firebase login:ci`
+- `app_specific_password` — if expired, regenerate at https://appleid.apple.com
+
+The config file is at `MDRTAcademy/fastlane/config.yml`. Ask the team lead
+for current tokens if they've been rotated.
+
+### Step 7 — Simulator setup
+
+```bash
+# List available simulators
+xcrun simctl list devices available | grep iPhone
+
+# Boot one (iPhone 16 is the project default)
+xcrun simctl boot "iPhone 16"
+
+# Verify it's running
+xcrun simctl list devices booted
+```
+
+### Step 8 — GTM container folder
+
+The app expects this folder to exist (GTM config):
+```bash
+mkdir -p MDRTAcademy/MDRTAcademy/container
+```
+
+### Step 9 — Smoke build
+
+Now verify the whole chain works:
+
+```bash
+xcodebuild -project MDRTAcademy/MDRTAcademy.xcodeproj \
+  -scheme "QA - English" \
+  -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+  build 2>&1 | tail -10
+```
+
+Expected: `** BUILD SUCCEEDED **` at the end (~2-5 min first run while SPM
+packages compile).
+
+If it fails, recovery in order:
+1. **"no developer tools were found"** → `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
+2. **SPM resolution failure / EightBitVideo** → redo Step 4
+3. **"No signing certificate found"** → redo Step 5b
+4. **"container/ not found" or GTM error** → redo Step 8
+
+Then install + launch on simulator:
+```bash
+# Find the .app (path varies by DerivedData hash)
+APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "MDRTAcademy.app" -path "*/Debug-iphonesimulator/*" | head -1)
+xcrun simctl install booted "$APP_PATH"
+xcrun simctl launch booted com.mdrt.MDRTAcademy-QA
+```
+
+App should boot on the simulator. If yes — onboarding done.
+
+### Step 10 — Smoke-test the agent loop
+
+Optional but recommended. Have the user paste a trivial agent prompt:
+
+> Take a screenshot of the simulator and tell me what's on screen.
+
+The agent (with the main project rule loaded) should run `xcrun simctl io
+booted screenshot`, read the PNG, drop it into the chat, and describe what's
+showing (login screen or whatever).
+
+If that works, the user is fully set up.
+
+## What to point them at next
+
+- Main project rule (`.cursor/rules/ios-project.mdc`) — conventions, CLI vocabulary, release behavior, gotchas.
+- `MDRTAcademy/fastlane/config.yml` — understand the per-env config.
+- The scheme naming convention: `{Env} - {Language}` for debug, `Release - {Env}` for distribution.
+
+Tell the user: "From here on, your interaction is normal Cursor chats. The
+agent knows the project from the main rule. Ask it to fix bugs, install
+builds, take screenshots, ship to QA — it'll take it from there."

@@ -1,0 +1,243 @@
+---
+description: Core behavior rules for AI agents working on this Android project
+alwaysApply: true
+---
+
+# Agent Behavior Rules
+
+## CLI-First Mandate
+- **ALWAYS use CLI tools instead of telling the user to open Android Studio**
+- Use `./gradlew` for builds, tests, lint, dependency resolution, and Firebase / Play Console publishing
+- Use `adb` for installs, launches, screenshots, system settings, nav-mode toggles, logcat, and `dumpsys` introspection
+- Use the `emulator` CLI to boot AVDs (`emulator -avd <name>`)
+- Use `sdkmanager` / `avdmanager` for SDK installs and AVD creation
+- Use `scrcpy` to mirror the device into a normal window the user can show on screen
+- Only mention the Android Studio GUI when the task genuinely requires it (interactive debugger / step-through, real-time Layout Inspector overlays on a running app, Profiler flamegraph UI)
+
+## When Android Studio GUI Is Unavoidable
+- Don't just say "open Android Studio" — provide **step-by-step instructions** with exact menu paths, tool window names, and what to look for
+- Example: "In Android Studio, open the `Run` menu → `Debug 'app'`, set a line breakpoint by clicking the gutter next to line 42 of `BaseActivity.kt`, then in the Debug tool window (bottom panel, bug icon) use the `Variables` pane to inspect..."
+- Assume the user has minimal Android Studio experience
+
+## Required environment (export on EVERY shell command)
+The user's default shell does **not** have these set. Prepend them to every
+build / `adb` / `emulator` / `sdkmanager` command, or run them once at the top
+of each persistent shell:
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME=~/Library/Android/sdk
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+```
+
+If `JAVA_HOME` is unset, Gradle does **not** fail with a clean "JAVA_HOME is
+not set" message — it silently falls back to whatever `java` is on `PATH`
+(usually a system Java 8 JRE), and the build fails much later with a cryptic
+variant-matching wall of text. **Recognize these symptoms as JAVA_HOME-not-set
+in disguise:**
+
+- `Could not resolve com.android.tools.build:gradle:X.Y.Z` (or any plugin)
+- `No matching variant of <plugin> ... was found`
+- `Incompatible because this component declares a component ... compatible with Java 11 [or 17]` paired with `the consumer needed a component ... compatible with Java 8`
+- `adb: command not found` / `emulator: command not found`
+- `SDK location not found` (this one is `ANDROID_HOME`, same family of issue)
+
+When you see any of those, the recovery is always:
+
+```bash
+./gradlew --stop      # kill stale Java-8 daemons spawned before the env fix
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME=~/Library/Android/sdk
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+# then retry the original command
+```
+
+The `./gradlew --stop` matters: Gradle reuses daemon processes across runs,
+and a daemon started under Java 8 stays on Java 8 even after you fix
+`JAVA_HOME` — you have to kill it first.
+
+## Search Before You Write
+- Always search existing code before generating new files or patterns
+- Check `app/src/main/java/com/mdrt/mdrtacademy/networking/` for HTTP / API endpoints (`NetworkingService.kt`, `NetworkingModule.kt`)
+- Check `app/src/main/java/com/mdrt/mdrtacademy/model/` for existing model definitions (mix of Kotlin and Java)
+- Check `app/src/main/java/com/mdrt/mdrtacademy/util/Constants.kt` for existing identifiers, URLs, keys
+- Check `app/src/main/res/values/strings.xml` for existing string keys (do **not** hardcode user-facing strings in Kotlin)
+- Check `app/src/main/java/com/mdrt/mdrtacademy/activity/` and `app/src/main/java/com/mdrt/mdrtacademy/ui/` for existing Activities / Fragments before creating new ones (`BaseActivity.kt` is the root extension point)
+- Check `app/build.gradle` for the dependency list before adding a new library
+
+## Build Verification
+- After making Kotlin / Java / XML changes, verify the build compiles:
+  ```bash
+  cd MDRTAcademy && ./gradlew :app:assembleQaDebug 2>&1 | tail -30
+  ```
+- After updating layout XML or drawable resources, the build is the only signal — there's no separate validator
+- After dependency changes in `app/build.gradle`, run `./gradlew :app:dependencies | head -50` to confirm the resolution graph
+- For Firebase QA distribution, the verified one-liner is `./gradlew :app:assembleQaRelease :app:appDistributionUploadQaRelease`
+- For Play Console production DRAFT upload, the verified one-liner is `./gradlew :app:publishProductionReleaseBundle`
+
+## Release request behavior (Firebase QA, Play Console production)
+
+When the user asks for a release — any of: *"ship to QA"*, *"release to
+Firebase"*, *"distribute to testers"*, *"publish to Play Store"*, *"send to
+production"*, *"deploy"*, or similar — **do not just execute it**. Pause and
+present these three options first, verbatim:
+
+> Before I do anything, three ways this can go:
+>
+> **1. I run it for you** — I invoke the Gradle task here, you watch the
+> output stream in this chat, I report the result (task name, versionCode
+> burned, the URL of the new release, what's left for a human). Recommended
+> for routine releases.
+>
+> **2. I give you the command** — I show you the exact command + any
+> prerequisites to check first, you paste and run in your own terminal. I'll
+> verify the result with you when you tell me it finished. Recommended if you
+> want to keep your hands on the wheel.
+>
+> **3. You do it through the Console UI** — I walk you step-by-step through
+> Firebase Console or Play Console with exact menu paths, what to upload,
+> what to fill in. Recommended if something with the CLI is broken or you
+> want to verify the release visually before it goes out.
+>
+> Which one?
+
+Then respond based on the choice:
+
+### If option 1 — "I run it for you"
+- Confirm prerequisites first: credential files present (`firebase-service-account.json` or `mdrtacademy-qa-*.json`), working tree state (any uncommitted changes that'll go into the build?), current `versionCode` if production.
+- Run the appropriate Gradle one-liner:
+  - Firebase QA: `./gradlew :app:assembleQaRelease :app:appDistributionUploadQaRelease --console=plain`
+  - Firebase Preprod: `./gradlew :app:assemblePreproductionRelease :app:appDistributionUploadPreproductionRelease --console=plain`
+  - Play Console production DRAFT: `./gradlew :app:publishProductionReleaseBundle --console=plain`
+- Stream output. After completion, report: exact task(s) invoked, `versionCode` burned (production only), distribution target (group alias for Firebase / track for Play), URL of the new release, what's left for a human (e.g. "Send for review" button in Play Console).
+
+### If option 2 — "I give you the command"
+- Show the full command with env-export prefix so it's copy-paste safe in any shell:
+  ```bash
+  export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
+    && export ANDROID_HOME=~/Library/Android/sdk \
+    && export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH" \
+    && cd "$(git rev-parse --show-toplevel)/MDRTAcademy" \
+    && ./gradlew <task-here> --console=plain
+  ```
+- List prerequisites to check first (credentials, branch, versionCode).
+- Tell them what success looks like in the output (`BUILD SUCCESSFUL`, the upload task line, the URL the task should print).
+- Offer: "When you're done, paste the last 20 lines of output and I'll verify."
+
+### If option 3 — "You do it through the Console UI"
+- For Firebase App Distribution:
+  1. Open Firebase Console → select the project that owns the QA Android app
+  2. Left sidebar → **App Distribution**
+  3. Top tabs → **Releases** → click **Upload new release**
+  4. Drag in the APK (build it locally first if needed: `./gradlew :app:assembleQaRelease`, find at `app/build/outputs/apk/qa/release/app-qa-release.apk`)
+  5. Paste release notes (or upload the contents of `MDRTAcademy/release_notes.txt`)
+  6. In **Testers and groups** field, type the group alias (e.g. `LPL+MDRT`)
+  7. Click **Distribute**
+- For Play Console production DRAFT:
+  1. Open Play Console → select the production app
+  2. Left sidebar → **Production** (under "Release" group)
+  3. Top tabs → **Releases** → click **Create new release**
+  4. Upload the AAB (build it locally first if needed: `./gradlew :app:bundleProductionRelease`, find at `app/build/outputs/bundle/productionRelease/app-production-release.aab`)
+  5. Set release name (default suggested: matches `versionName` from `app/build.gradle`)
+  6. Paste release notes per locale
+  7. **Important:** click **Save as draft**, not **Review release**, to match the `releaseStatus.DRAFT` guard in the codebase
+  8. Confirm the draft is visible in the Production track's Releases tab
+- After the user reports done, offer to verify (e.g. "want me to check the Play Console API for the draft's status?").
+
+### Exception: never skip the menu
+
+Even if the user's prompt looks unambiguous (*"just run the prod release"*), present the three options first. The user can pick option 1 immediately — it's a 5-second beat, not a blocker — but the menu enforces a deliberate-choice gate that's appropriate for irreversible operations like burning a `versionCode` or pushing to a real Play Store listing.
+
+## Onboarding new developers / bootstrapping new projects
+
+Two companion rules cover setup scenarios. Both load on demand; you don't
+need to memorize their contents — just route the user to the right one and
+follow its sequence.
+
+- **Joining the existing team** (Firebase + Play Console already configured,
+  user just needs local toolchain + credentials): point them at
+  `.cursor/rules/android-project-onboarding.mdc`. Triggers on phrases like
+  *"how do I set this up"*, *"first time on this repo"*, *"can't build"*,
+  *"what do I need to install"*, *"onboard me"*.
+- **Bootstrapping a brand-new Android project** (no Firebase yet, no Play
+  Console listing yet, needs the plugins wired from scratch): point them at
+  `.cursor/rules/android-project-bootstrap.mdc`. Triggers on phrases like
+  *"new Android project"*, *"setting up Firebase"*, *"setting up Play
+  Console"*, *"first time publishing"*, *"replicate this delivery setup in
+  another repo"*. **Warn the user up front** that this is an afternoon of
+  hands-on work plus 1–2 days of Play developer-account verification waits,
+  and there's a $25 Play Console fee.
+
+If you're unsure which case applies, ask the user one question: *"Are you
+joining an existing team's project that already has Firebase + Play set up,
+or are you starting from a blank Android project with no Firebase or Play
+yet?"*
+
+## Delivery pipeline guardrails
+- **Production publishes are wired as `releaseStatus.DRAFT`** in `app/build.gradle` (lines 211–220 of the `playConfigs.production` block). This means an upload creates a Play Console DRAFT but does **not** submit for Google review — a human still clicks "Send for review" in the Play Console UI. **Never** change this to `COMPLETED` without explicit user permission.
+- Every uploaded AAB burns a `versionCode` forever, even discarded drafts. The triplet `play-publisher` plugin has `resolutionStrategy.AUTO` set, so if a `versionCode` collision happens it auto-bumps — don't manually bump `versionCode` unless that fails too.
+- Required credential files (all gitignored):
+  - `firebase-service-account.json` — Firebase App Distribution upload
+  - `google-services.json` — Firebase client config
+  - `mdrtacademy-qa-1db5bc700e4e.json` — Google Play API service account
+  - `keystores/mdrtacadedmy-release` + `keystore.properties` — release signing
+- If any of those are missing, **stop and tell the user** rather than improvising — the build will fail in a confusing way mid-pipeline otherwise.
+
+## App flavors and package ids
+The app has four product flavors. Always confirm which one the user means before installing:
+
+| Flavor | Package id | Backend |
+|---|---|---|
+| `qa` | `com.mdrt.mdrtacademy.qa` | qa.mdrtacademy.org |
+| `preproduction` | `com.mdrt.mdrtacademy.preproduction` | preproduction.mdrtacademy.org |
+| `staging` | `com.mdrt.mdrtacademy.staging` | stg.mdrtacademy.org |
+| `production` | `com.mdrt.mdrtacademy` | mdrtacademy.org |
+
+`qa` is the default for everyday work and the only flavor used in the agentic showcase / live talk.
+
+## On-device interaction (the agent's "browser" for mobile)
+- Install / update an APK: `adb install -r path/to/app-qa-debug.apk`
+- Force-stop to reset state: `adb shell am force-stop com.mdrt.mdrtacademy.qa`
+- Launch: `adb shell monkey -p com.mdrt.mdrtacademy.qa -c android.intent.category.LAUNCHER 1`
+- Identify topmost Activity: `adb shell dumpsys activity activities | grep topResumedActivity`
+- Tap / swipe: `adb shell input tap <x> <y>` / `adb shell input swipe <x1> <y1> <x2> <y2> <duration_ms>`
+- Get device resolution (for scaling taps): `adb shell wm size`
+- Screenshot (3-step idiom — capture, pull, clean up):
+  ```bash
+  adb shell screencap -p /sdcard/s.png \
+    && adb pull /sdcard/s.png /tmp/<name>.png \
+    && adb shell rm /sdcard/s.png
+  ```
+- Force 3-button nav (matches the most-reported bug scenario):
+  ```bash
+  adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton
+  adb shell cmd overlay disable com.android.internal.systemui.navbar.gestural
+  ```
+- Restore gesture nav: swap the two `enable`/`disable` overlay names.
+
+After taking a screenshot, **read it back into the chat as an artifact** so the user can see what the device actually rendered.
+
+## User Context
+- The primary developer is a **Ruby on Rails / web backend developer** with minimal Android / Kotlin experience
+- Explain Android / Kotlin / Gradle concepts using Rails / web analogies when helpful
+- Be explicit about where files go and why — don't assume familiarity with Android project conventions
+- When explaining Android patterns, relate to MVC (which Rails devs know well):
+  - `Activity` / `Fragment` = Rails Controller (with View merged in for screen-level UI)
+  - Layout XML (`res/layout/*.xml`) = ERB / HTML view template (declarative, mostly inert)
+  - `ViewModel` (AAC) = service object / presenter — survives config changes the way a server-side controller survives a single request
+  - Data class / `data class Foo(...)` in `model/` = ActiveRecord model **without** DB persistence (no rows, just shape)
+  - `NetworkingService` (Retrofit) = HTTP client / API wrapper (like Faraday / HTTParty wrappers)
+  - `SharedPreferences` = session / cookies (small key-value, on-disk, app-scoped)
+  - Room database = ActiveRecord with SQLite (DAOs ≈ scopes, `@Entity` ≈ a model class)
+  - `LiveData` / `Flow` / EventBus = pub/sub / `ActiveSupport::Notifications`
+  - `Intent` = a serialized route + params (you "navigate" by handing the OS an `Intent` the way you'd `redirect_to`)
+  - Gradle = Bundler + Rake + Webpacker in one. `build.gradle` is `Gemfile` + `Rakefile` + asset pipeline config.
+  - AndroidManifest.xml = `config/routes.rb` + `config/application.rb` + permissions declarations, fused into one XML file
+  - `R.string.foo` lookups in code = `t('foo')` i18n lookups in Rails views
+
+## Common gotchas (recognize these failure modes)
+- **JAVA_HOME / ANDROID_HOME / PATH symptoms** → see the "Required environment" section above. This is the #1 cause of confusing Gradle / adb failures in this repo and the symptoms are non-obvious; check that section first before chasing anything else.
+- **`Could not resolve all artifacts`** (NOT paired with a "compatible with Java 8" variant message) → genuine network issue or proxy. Retry; if it persists, check `gradle.properties` for `org.gradle.jvmargs` and proxy settings. (If you DO see the Java 8 variant message, it's `JAVA_HOME`, not the network.)
+- **App installs but crashes on launch with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`** → the signing certificate changed (you built a release variant over a debug, or vice versa). `adb uninstall <package_id>` then re-install.
+- **`adb` reports `device offline`** → `adb kill-server && adb start-server && adb devices`. If still offline, the emulator process is wedged; kill and reboot it.
+- **Edge-to-edge layout regression on Android 15 / SDK 35+** → `BaseActivity.kt` has the inset listener and bleed-color hooks; check `shouldApplyDefaultSystemBarInsets()`, `statusBarBleedColor()`, `navigationBarBleedColor()`, and `onSystemBarInsetsChanged()` before adding ad-hoc per-Activity insets handling. See `docs/agentic-showcase-edge-to-edge-deepdive.md` for the full rationale.
