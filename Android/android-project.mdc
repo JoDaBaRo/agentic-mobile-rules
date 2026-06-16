@@ -239,20 +239,46 @@ doesn't touch. On a default 6 GB partition, accumulated bloat can leave under
 500 MB free even when zero third-party packages are installed. That's why
 this project bumps the partition to 16 GB at AVD-create time AND launch time.
 
-Preflight before any APK install ≥ 50 MB:
+**Preflight before boot: size-check the APK against the partition.**
+
+The 16 GB default handles most apps. For unusually large APKs, **bump the
+partition BEFORE booting** rather than discovering the problem mid-install
+when you've already spent a minute on cold boot. Real install footprint is
+roughly 3-5× the APK size (extracted resources + dexopt + native libs +
+install-time staging), so size the partition accordingly. If you have a
+target APK on disk:
+
+```bash
+ls -lh /path/to/<your-build>.apk   # check size before booting
+```
+
+| APK size | Partition needed | What to do |
+|---|---|---|
+| < 200 MB | 16 GB (default) | Just boot. The launcher handles it. |
+| 200 MB – 1 GB | 16 GB (default) | Just boot, but **preflight `df -h /data` before installing**. |
+| 1 – 2 GB | 32 GB | Wipe + bump BEFORE booting (see procedure below). `-partition-size 32768`. |
+| > 2 GB | 64+ GB | Wipe + bump BEFORE booting. `-partition-size 65536`. Note: image grows on disk too. |
+
+If you don't know the APK size yet (haven't built it), default to 16 GB and
+fall back to a resize later if the install fails. But if you've just been
+asked to install a specific known-large APK, do the resize first — it costs
+~30 seconds and saves you a failed-install + retry cycle.
+
+**Preflight after boot, before any APK install ≥ 50 MB:**
 
 ```bash
 adb shell df -h /data            # want >1 GB free; warn if <500 MB
 ```
 
-If `/data` is tight despite a freshly cold-booted emulator, the underlying
-`userdata-qemu.img` is still on the old 6 GB layout. Permanent fix:
+**Permanent partition-resize procedure** (use this when the APK-size check
+above tells you 16 GB isn't enough, or when an existing AVD still has the
+old 6 GB layout):
 
 1. `adb emu kill`
 2. Edit `~/.android/avd/Medium_Phone.avd/config.ini` and set:
-   `disk.dataPartition.size = 17179869184` *(16 GB in bytes; was 6442450944)*
-3. Boot once with `emulator -avd Medium_Phone_API_36 -wipe-data -partition-size 16384 -no-snapshot-load` to recreate the image at the new size. Loses any cached state on the emulator (Google sign-in, dev settings).
-4. From then on, the launcher's `-partition-size 16384` keeps it at 16 GB.
+   `disk.dataPartition.size = <bytes>` — values: 16 GB = `17179869184`, 32 GB = `34359738368`, 64 GB = `68719476736`. *(The original default was 6442450944 = 6 GB.)*
+3. Boot once with `emulator -avd Medium_Phone_API_36 -wipe-data -partition-size <MB> -no-snapshot-load` to recreate the image at the new size (16 GB = `16384`, 32 GB = `32768`, 64 GB = `65536`). Loses any cached state on the emulator (Google sign-in, dev settings).
+4. Update the launcher script's `-partition-size` line to match, so future boots stay at the new size without needing `-wipe-data`.
 
 `adb uninstall com.mdrt.mdrtacademy.qa` still helps marginally between dry-run
 cycles, but it's a +100 MB recovery, not a fix.
