@@ -12,7 +12,9 @@ agentic-mobile-rules/
 │   ├── ADAPTING.md              ← find-and-replace guide for your project
 │   ├── android-project.mdc              (alwaysApply: true — every-chat behavior)
 │   ├── android-project-onboarding.mdc   (on-demand — joining an existing team)
-│   └── android-project-bootstrap.mdc    (on-demand — brand-new project from zero)
+│   ├── android-project-bootstrap.mdc    (on-demand — brand-new project from zero)
+│   └── scripts/
+│       └── agent-boot-emulator.py       (Python launcher for the AVD — solves agent-shell + snapshot issues)
 └── iOS/
     ├── README.md                ← iOS-specific overview + comparison table
     ├── ADAPTING.md              ← find-and-replace guide for your project

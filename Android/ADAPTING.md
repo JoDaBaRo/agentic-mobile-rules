@@ -29,6 +29,9 @@ The fastest workflow:
 | `keystores/mdrtacadedmy-release` | `keystores/<your-release-keystore>` | Or wherever your release keystore lives |
 | `LPL+MDRT` | `<your-tester-group-alias>` | Your Firebase App Distribution tester group |
 | `qa.mdrtacademy.org` / `preproduction.mdrtacademy.org` / `stg.mdrtacademy.org` / `mdrtacademy.org` | `<your-backend-urls>` | Per-flavor backend URLs (only appears in commentary, not enforced) |
+| `MDRTAcademy/scripts/agent-boot-emulator.py` | `<your-module>/scripts/agent-boot-emulator.py` | Path to the emulator launcher script — see "The boot launcher" section below |
+| `Medium_Phone_API_36` | `<your-AVD-name>` | Your AVD name. The launcher defaults to this; pass yours as `python3 scripts/agent-boot-emulator.py YourAvdName` to override |
+| `Medium_Phone.avd` | `<your-AVD-data-dir>` | The AVD's *data directory* under `~/.android/avd/` (frequently differs from the AVD name — check with `ls ~/.android/avd/`) |
 
 ## Files you DON'T rename
 
@@ -38,6 +41,53 @@ them as-is:
 - `firebase-service-account.json` — Firebase Admin SDK key, name is conventional but flexible
 - `google-services.json` — Firebase config, **must** be exactly this name + at `app/google-services.json`
 - `keystore.properties` — Gradle convention
+
+## The boot launcher (`scripts/agent-boot-emulator.py`)
+
+A Python launcher that reliably boots the AVD from inside an agent shell. It
+solves two real failure modes documented in its own header:
+
+1. **Process-group teardown** — `nohup emulator -avd ... &` from an agent
+   shell gets killed when the spawning shell returns. The launcher
+   double-forks + calls `os.setsid()` to fully detach.
+2. **Corrupt Quick Boot snapshots** — a stale `default_boot` snapshot can
+   crash qemu on GPU restore. The launcher always passes `-no-snapshot-load`.
+
+It also uses software GPU (`-gpu swiftshader_indirect`) for headless
+reliability and a larger `-partition-size` to avoid `INSTALL_FAILED_INSUFFICIENT_STORAGE`
+on large APK installs.
+
+### How to install in your project
+
+```bash
+mkdir -p <your-module>/scripts
+cp /path/to/agentic-mobile-rules/Android/scripts/agent-boot-emulator.py <your-module>/scripts/
+chmod +x <your-module>/scripts/agent-boot-emulator.py
+```
+
+Then either pass your AVD as an arg, or edit line 31 of the script to change
+the default from `Medium_Phone_API_36` to your AVD name. Same applies for the
+JDK path on line 43 if you're not using Android Studio's bundled JBR.
+
+### Recommended companion AVD config
+
+For belt-and-suspenders cold-booting (so even a non-launcher invocation is
+safe), add this line to `~/.android/avd/<your-AVD>.avd/config.ini`:
+
+```
+fastboot.forceColdBoot = yes
+```
+
+This makes the AVD ignore the Quick Boot snapshot regardless of how it's
+launched. Pairs well with the launcher's `-no-snapshot-load` flag.
+
+### When to update the rule's path references
+
+After installing, update the path in your project's copy of
+`android-project.mdc` (search for `MDRTAcademy/scripts/agent-boot-emulator.py`
+and replace with your actual path — likely `app/scripts/agent-boot-emulator.py`
+or just `scripts/agent-boot-emulator.py`). Same for
+`android-project-onboarding.mdc`'s Step 5 callout.
 
 ## Adaptations that need real thinking (not just find-and-replace)
 
@@ -104,6 +154,7 @@ sanity-checks:
 - [ ] **Release behavior fires:** *"Ship a build to my testers."* → agent responds with the 3-option menu (NOT just runs the command)
 - [ ] **Onboarding loads:** *"Help me set up this project for the first time."* → agent loads the onboarding rule and starts Step 0
 - [ ] **Bootstrap loads:** *"I want to wire Firebase into a brand-new Android app."* → agent loads the bootstrap rule and starts Step 0
+- [ ] **Boot launcher works:** `python3 <your-module>/scripts/agent-boot-emulator.py` → after `adb wait-for-device` returns and `sys.boot_completed = 1`, your AVD is up. If the window appears for ~1s then vanishes, the launcher's process-group fix isn't kicking in — verify the script's `os.setsid()` call ran by checking `/tmp/agent-emulator.log` exists and has emulator startup output.
 
 If any of those don't fire correctly, the `description` field on the
 relevant rule needs adjustment to match the phrasing your agent (and your

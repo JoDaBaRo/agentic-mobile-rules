@@ -195,6 +195,41 @@ The app has four product flavors. Always confirm which one the user means before
 
 `qa` is the default for everyday work and the only flavor used in the agentic showcase / live talk.
 
+## Booting the emulator (do this first; it has sharp edges)
+
+The AVD is `Medium_Phone_API_36` (API 36, arm64, Play Store image). A naive
+`emulator -avd ... &` from an agent shell does **not** work reliably — use the
+committed launcher:
+
+```bash
+python3 MDRTAcademy/scripts/agent-boot-emulator.py        # detaches + cold-boots
+export PATH="$HOME/Library/Android/sdk/platform-tools:$PATH"
+adb wait-for-device
+until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; do sleep 2; done
+```
+
+A clean cold boot is ~15-20s. The launcher exists because two failure modes
+bite a plain background launch (both documented in the script header):
+
+1. **Process-group teardown.** When you background the emulator and the
+   spawning agent shell returns, the harness tears down the process group and
+   the emulator dies a second or two later ("boots, then the window vanishes").
+   macOS has no `setsid`, so the launcher daemonizes with a double-fork +
+   `os.setsid()` to fully detach. `nohup`/`disown` alone is **not** enough.
+2. **Corrupt Quick Boot snapshot.** A stale `default_boot` snapshot can fail
+   GPU restore (`ERROR | Failed to find ColorBuffer:0`) and crash qemu right
+   after the window appears. The launcher always passes `-no-snapshot-load`,
+   and the AVD's `config.ini` is set to `fastboot.forceColdBoot = yes` so even
+   a plain launch is safe. If you ever see the ColorBuffer crash again, delete
+   `~/.android/avd/Medium_Phone.avd/snapshots/default_boot` (the AVD's data
+   dir is `Medium_Phone.avd`, not `Medium_Phone_API_36.avd`).
+
+The launcher also uses software GPU (`-gpu swiftshader_indirect`) for headless
+reliability and `-partition-size 8192` so large (~128 MB) APK installs don't
+hit `INSTALL_FAILED_INSUFFICIENT_STORAGE`. If `/data` still fills up, `adb
+uninstall com.mdrt.mdrtacademy.qa` before reinstalling reclaims the most space.
+To shut the emulator down cleanly: `adb emu kill`.
+
 ## On-device interaction (the agent's "browser" for mobile)
 - Install / update an APK: `adb install -r path/to/app-qa-debug.apk`
 - Force-stop to reset state: `adb shell am force-stop com.mdrt.mdrtacademy.qa`
@@ -240,4 +275,6 @@ After taking a screenshot, **read it back into the chat as an artifact** so the 
 - **`Could not resolve all artifacts`** (NOT paired with a "compatible with Java 8" variant message) → genuine network issue or proxy. Retry; if it persists, check `gradle.properties` for `org.gradle.jvmargs` and proxy settings. (If you DO see the Java 8 variant message, it's `JAVA_HOME`, not the network.)
 - **App installs but crashes on launch with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`** → the signing certificate changed (you built a release variant over a debug, or vice versa). `adb uninstall <package_id>` then re-install.
 - **`adb` reports `device offline`** → `adb kill-server && adb start-server && adb devices`. If still offline, the emulator process is wedged; kill and reboot it.
+- **Emulator "boots for a second then closes"** → almost always one of the two boot failure modes in the "Booting the emulator" section: a corrupt Quick Boot snapshot (`Failed to find ColorBuffer:0` in the log) or process-group teardown of a backgrounded launch. Use `MDRTAcademy/scripts/agent-boot-emulator.py` rather than launching `emulator` directly.
+- **`INSTALL_FAILED_INSUFFICIENT_STORAGE` on a ~128 MB APK** → the AVD `/data` partition is near full. `adb uninstall com.mdrt.mdrtacademy.qa` first, and/or relaunch via the script (it passes `-partition-size 8192`).
 - **Edge-to-edge layout regression on Android 15 / SDK 35+** → `BaseActivity.kt` has the inset listener and bleed-color hooks; check `shouldApplyDefaultSystemBarInsets()`, `statusBarBleedColor()`, `navigationBarBleedColor()`, and `onSystemBarInsetsChanged()` before adding ad-hoc per-Activity insets handling. See `docs/agentic-showcase-edge-to-edge-deepdive.md` for the full rationale.

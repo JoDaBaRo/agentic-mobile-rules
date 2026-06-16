@@ -209,6 +209,14 @@ echo "Emulator is up."
 
 If `adb devices` shows the emulator as `online`, you're good.
 
+> **If you're an agent (not a human at a terminal), boot via
+> `python3 MDRTAcademy/scripts/agent-boot-emulator.py` instead of the
+> backgrounded `emulator &` above.** A backgrounded launch gets killed by the
+> shell harness's process-group teardown, and a stale Quick Boot snapshot can
+> crash qemu on restore. The launcher daemonizes (double-fork + `setsid`) and
+> cold-boots to avoid both. See the "Booting the emulator" section of
+> `.cursor/rules/android-project.mdc` for the full rationale.
+
 ### Step 6 — Smoke build
 
 Now verify the whole chain works end-to-end:
