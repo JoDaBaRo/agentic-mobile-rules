@@ -54,6 +54,13 @@ os.execv(f"{sdk}/emulator/emulator", [
     "-no-snapshot-load",          # always cold-boot; never restore a stale snapshot
     "-no-boot-anim",              # shave a few seconds off boot
     "-gpu", "swiftshader_indirect",  # software GPU: reliable in headless/agent contexts
-    "-partition-size", "8192",    # headroom so large APK installs don't hit INSUFFICIENT_STORAGE
+    "-partition-size", "16384",   # 16GB /data: System bloat (Play Services, OEM images) accumulates over
+                                  # boots and routinely consumes 5GB+ of a default 6GB partition, leaving
+                                  # no room for a ~128MB APK install. 16GB gives ~3x headroom for many
+                                  # install/uninstall cycles. NOTE: -partition-size can only enlarge the
+                                  # underlying userdata-qemu.img on -wipe-data; if you're upgrading from a
+                                  # smaller partition on an existing AVD, also bump disk.dataPartition.size
+                                  # in ~/.android/avd/<name>.avd/config.ini AND do a one-time `emulator
+                                  # -avd <name> -wipe-data` to actualize the resize.
     "-dns-server", "8.8.8.8,8.8.4.4",
 ])

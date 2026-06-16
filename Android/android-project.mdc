@@ -225,10 +225,37 @@ bite a plain background launch (both documented in the script header):
    dir is `Medium_Phone.avd`, not `Medium_Phone_API_36.avd`).
 
 The launcher also uses software GPU (`-gpu swiftshader_indirect`) for headless
-reliability and `-partition-size 8192` so large (~128 MB) APK installs don't
-hit `INSTALL_FAILED_INSUFFICIENT_STORAGE`. If `/data` still fills up, `adb
-uninstall com.mdrt.mdrtacademy.qa` before reinstalling reclaims the most space.
-To shut the emulator down cleanly: `adb emu kill`.
+reliability and `-partition-size 16384` so the AVD's `/data` is 16 GB, big
+enough that the next ~128 MB APK install never hits
+`INSTALL_FAILED_INSUFFICIENT_STORAGE`. To shut the emulator down cleanly:
+`adb emu kill`.
+
+**Storage discipline (read before debugging an INSUFFICIENT_STORAGE failure):**
+
+The naive intuition — "old version is still installed, just uninstall it" — is
+almost always wrong on this AVD. **Most of `/data` is system bloat** (Play
+Services updates, OEM image updates, dalvik AOT cache) that `adb uninstall`
+doesn't touch. On a default 6 GB partition, accumulated bloat can leave under
+500 MB free even when zero third-party packages are installed. That's why
+this project bumps the partition to 16 GB at AVD-create time AND launch time.
+
+Preflight before any APK install ≥ 50 MB:
+
+```bash
+adb shell df -h /data            # want >1 GB free; warn if <500 MB
+```
+
+If `/data` is tight despite a freshly cold-booted emulator, the underlying
+`userdata-qemu.img` is still on the old 6 GB layout. Permanent fix:
+
+1. `adb emu kill`
+2. Edit `~/.android/avd/Medium_Phone.avd/config.ini` and set:
+   `disk.dataPartition.size = 17179869184` *(16 GB in bytes; was 6442450944)*
+3. Boot once with `emulator -avd Medium_Phone_API_36 -wipe-data -partition-size 16384 -no-snapshot-load` to recreate the image at the new size. Loses any cached state on the emulator (Google sign-in, dev settings).
+4. From then on, the launcher's `-partition-size 16384` keeps it at 16 GB.
+
+`adb uninstall com.mdrt.mdrtacademy.qa` still helps marginally between dry-run
+cycles, but it's a +100 MB recovery, not a fix.
 
 ## On-device interaction (the agent's "browser" for mobile)
 - Install / update an APK: `adb install -r path/to/app-qa-debug.apk`
@@ -276,5 +303,5 @@ After taking a screenshot, **read it back into the chat as an artifact** so the 
 - **App installs but crashes on launch with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`** → the signing certificate changed (you built a release variant over a debug, or vice versa). `adb uninstall <package_id>` then re-install.
 - **`adb` reports `device offline`** → `adb kill-server && adb start-server && adb devices`. If still offline, the emulator process is wedged; kill and reboot it.
 - **Emulator "boots for a second then closes"** → almost always one of the two boot failure modes in the "Booting the emulator" section: a corrupt Quick Boot snapshot (`Failed to find ColorBuffer:0` in the log) or process-group teardown of a backgrounded launch. Use `MDRTAcademy/scripts/agent-boot-emulator.py` rather than launching `emulator` directly.
-- **`INSTALL_FAILED_INSUFFICIENT_STORAGE` on a ~128 MB APK** → the AVD `/data` partition is near full. `adb uninstall com.mdrt.mdrtacademy.qa` first, and/or relaunch via the script (it passes `-partition-size 8192`).
+- **`INSTALL_FAILED_INSUFFICIENT_STORAGE` on a ~128 MB APK** → see "Storage discipline" in the "Booting the emulator" section above. Short version: `adb uninstall` only recovers ~100 MB because the bloat is system (Play Services / dalvik cache), not your app. If the launcher is current (passes `-partition-size 16384`) and you still see this, the underlying `userdata-qemu.img` is on the old 6 GB layout — needs a one-time `-wipe-data` boot to actualize the larger partition. **Always preflight with `adb shell df -h /data` before installs ≥ 50 MB.**
 - **Edge-to-edge layout regression on Android 15 / SDK 35+** → `BaseActivity.kt` has the inset listener and bleed-color hooks; check `shouldApplyDefaultSystemBarInsets()`, `statusBarBleedColor()`, `navigationBarBleedColor()`, and `onSystemBarInsetsChanged()` before adding ad-hoc per-Activity insets handling. See `docs/agentic-showcase-edge-to-edge-deepdive.md` for the full rationale.
