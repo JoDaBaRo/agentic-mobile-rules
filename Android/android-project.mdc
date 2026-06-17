@@ -80,26 +80,34 @@ and a daemon started under Java 8 stays on Java 8 even after you fix
 When the user asks for a release — any of: *"ship to QA"*, *"release to
 Firebase"*, *"distribute to testers"*, *"publish to Play Store"*, *"send to
 production"*, *"deploy"*, or similar — **do not just execute it**. Pause and
-present these three options first, verbatim:
+present these three options first using Cursor's **interactive multiple-choice
+UI** (the structured single-select question picker) — **NOT** as plain text or
+a markdown blockquote. Rendering them as selectable options is what lets the
+user click a choice; presenting them as prose is a known regression (and
+diverges from the sibling iOS rule, which already mandates the interactive
+picker — keep the two platforms in lockstep).
 
-> Before I do anything, three ways this can go:
->
-> **1. I run it for you** — I invoke the Gradle task here, you watch the
-> output stream in this chat, I report the result (task name, versionCode
-> burned, the URL of the new release, what's left for a human). Recommended
-> for routine releases.
->
-> **2. I give you the command** — I show you the exact command + any
-> prerequisites to check first, you paste and run in your own terminal. I'll
-> verify the result with you when you tell me it finished. Recommended if you
-> want to keep your hands on the wheel.
->
-> **3. You do it through the Console UI** — I walk you step-by-step through
-> Firebase Console or Play Console with exact menu paths, what to upload,
-> what to fill in. Recommended if something with the CLI is broken or you
-> want to verify the release visually before it goes out.
->
-> Which one?
+Ask **one single-select question**, prompt it with **"Which one?"** (a title
+like *"How should I run this release?"* is good), and give it exactly these
+three options. List option 1 **first** and append **"(Recommended)"** to its
+label, per the picker's convention:
+
+1. **I run it for you** — I invoke the Gradle task here, you watch the output
+   stream in this chat, I report the result (task name, versionCode burned, the
+   URL of the new release, what's left for a human). Recommended for routine
+   releases.
+2. **I give you the command** — I show you the exact command + any prerequisites
+   to check first, you paste and run in your own terminal. I'll verify the
+   result with you when you tell me it finished. Recommended if you want to keep
+   your hands on the wheel.
+3. **You do it through the Console UI** — I walk you step-by-step through
+   Firebase Console or Play Console with exact menu paths, what to upload, what
+   to fill in. Recommended if something with the CLI is broken or you want to
+   verify the release visually before it goes out.
+
+The picker supplies a free-text "Other" escape hatch automatically, so don't add
+one. Do **not** also restate the options as a bulleted/numbered list in the
+message body — the picker IS the menu.
 
 Then respond based on the choice:
 
@@ -146,7 +154,7 @@ Then respond based on the choice:
 
 ### Exception: never skip the menu
 
-Even if the user's prompt looks unambiguous (*"just run the prod release"*), present the three options first. The user can pick option 1 immediately — it's a 5-second beat, not a blocker — but the menu enforces a deliberate-choice gate that's appropriate for irreversible operations like burning a `versionCode` or pushing to a real Play Store listing.
+Even if the user's prompt looks unambiguous (*"just run the prod release"*), present the three options first **through the interactive picker** (never as a prose menu, even when the prompt already spells out which option they want). The user can click option 1 immediately — it's a 5-second beat, not a blocker — but the picker enforces a deliberate-choice gate that's appropriate for irreversible operations like burning a `versionCode` or pushing to a real Play Store listing.
 
 ## Onboarding new developers / bootstrapping new projects
 
