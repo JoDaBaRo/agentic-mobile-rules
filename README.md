@@ -1,7 +1,15 @@
 # Agentic Mobile Rules
 
 A collection of Cursor rule files (`.mdc`) that turn the Cursor agent into a
-productive mobile-dev teammate.
+productive mobile-dev teammate — without requiring Android Studio or Xcode
+for day-to-day work.
+
+These rules were built for and live-demonstrated in the talk
+**"Mobile development, without a mobile IDE"**. The full talk runbook lives
+in `mdrtacademy_android/MDRTAcademy/docs/agentic-showcase.md`; this folder
+is the **portable, shareable artifact** of that talk — drop these rules into
+any mobile project's `.cursor/rules/` directory and the agent picks up the
+behaviors.
 
 ## What's in here
 
@@ -26,12 +34,12 @@ agentic-mobile-rules/
 ## What these rules teach the agent to do
 
 **Android:**
-- **Drive the Android toolchain via CLI** Gradle, `adb`, `sdkmanager`,
+- **Drive the Android toolchain via CLI** — Gradle, `adb`, `sdkmanager`,
   `emulator`, `scrcpy`. No Android Studio open day-to-day.
-- **Interact with a running emulator like a web agent uses a browser**
+- **Interact with a running emulator like a web agent uses a browser** —
   install APKs, launch the app, tap, swipe, screenshot, toggle nav modes,
   read `dumpsys`.
-- **Recover from common toolchain failures** recognize the cryptic
+- **Recover from common toolchain failures** — recognize the cryptic
   "No matching variant ... compatible with Java 8" wall as `JAVA_HOME`-not-set
   in disguise, kill stale Gradle daemons, fix and retry.
 
@@ -46,10 +54,10 @@ agentic-mobile-rules/
 **Both platforms:**
 - **Onboard a new developer** to an existing configured project (~60 min
   walkthrough including credential acquisition + smoke build).
-- **Bootstrap a brand-new project from zero** Firebase, distribution
+- **Bootstrap a brand-new project from zero** — Firebase, distribution
   channels, signing, Gradle plugins (Android) or Fastlane lanes (iOS),
   safety guards on production publishes.
-- **Present a 3-option menu on every release request** let the user pick
+- **Present a 3-option menu on every release request** — let the user pick
   whether the agent runs the release, gives them the command to run, or
   walks them step-by-step through the Console UI.
 
@@ -61,7 +69,7 @@ agentic-mobile-rules/
    mkdir -p /path/to/your/project/.cursor/rules
    cp Android/*.mdc /path/to/your/project/.cursor/rules/
    ```
-2. **Adapt the placeholder values** to your project see `Android/ADAPTING.md`
+2. **Adapt the placeholder values** to your project — see `Android/ADAPTING.md`
    for the find-and-replace checklist.
 3. **Open Cursor in your project** and verify the rule loaded:
    > What do you know about this project?
@@ -78,11 +86,23 @@ agentic-mobile-rules/
 | **On-demand: bootstrap** | `*-project-bootstrap.mdc` | When user asks to set up a brand-new project | Walks through Firebase + Play Console + plugin wiring + safety guards from zero. |
 
 This pattern is portable across mobile platforms (Android, iOS, React Native,
-Flutter) because the *shape* of the work is the same   only the toolchain
+Flutter) because the *shape* of the work is the same — only the toolchain
 names change.
+
+## Provenance
+
+Built and shipped as part of the **"Mobile development, without a mobile IDE"**
+talk by Jose David Bayona at LaunchPad Lab / SPACE. The companion docs in the
+`mdrtacademy_android` repo explain the talk's three pillars:
+
+1. Your IDE doesn't matter. The CLI does.
+2. The agent drives the simulator like a web agent drives the browser.
+3. One afternoon of setup, then every future delivery is one prompt.
+
+These rules are the embodiment of pillar #3 — the one-time setup made durable
+and shareable.
 
 ## License
 
-TBD — license to be decided before public release. Until then, treat as
-**all rights reserved**. MIT / Apache-2.0 / CC0 are the most likely
-candidates for the final license.
+(Add your preferred license — MIT / Apache-2.0 / CC0 are common choices for
+this kind of shareable agent-config artifact.)
