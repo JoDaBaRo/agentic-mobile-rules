@@ -297,8 +297,8 @@ cycles, but it's a +100 MB recovery, not a fix.
 - Force-stop to reset state: `adb shell am force-stop com.mdrt.mdrtacademy.qa`
 - Launch: `adb shell monkey -p com.mdrt.mdrtacademy.qa -c android.intent.category.LAUNCHER 1`
 - Identify topmost Activity: `adb shell dumpsys activity activities | grep topResumedActivity`
-- Tap / swipe: `adb shell input tap <x> <y>` / `adb shell input swipe <x1> <y1> <x2> <y2> <duration_ms>`
-- Get device resolution (for scaling taps): `adb shell wm size`
+- Tap / swipe: `adb shell input tap <x> <y>` / `adb shell input swipe <x1> <y1> <x2> <y2> <duration_ms>` — **coordinates are device pixels matching the `screencap` output; see "Tap coordinate discipline" below**
+- Get device resolution: `adb shell wm size` *(this AVD is `1080x2400`)*
 - Screenshot (3-step idiom — capture, pull, clean up):
   ```bash
   adb shell screencap -p /sdcard/s.png \
@@ -313,6 +313,33 @@ cycles, but it's a +100 MB recovery, not a fix.
 - Restore gesture nav: swap the two `enable`/`disable` overlay names.
 
 After taking a screenshot, **read it back into the chat as an artifact** so the user can see what the device actually rendered.
+
+### Tap coordinate discipline (the #1 cause of "wrong-spot tap" iteration loops)
+
+`adb shell input tap X Y` expects coordinates in the **device's native pixel
+space** — the exact same coordinate system as the `screencap` output PNG.
+This AVD is `1080x2400`. Confirm if you're unsure: `adb shell wm size`.
+
+The recurring failure mode that wastes a turn:
+
+1. Agent takes a screenshot
+2. The chat UI may render the PNG at a different size than its actual pixel dimensions
+3. Agent eyeballs coordinates from the visually-displayed image (or invents "scale" math) → coordinates end up at screenshot-display scale, not device-pixel scale
+4. `input tap` lands hundreds of pixels off the intended target
+5. Agent screenshots again, sees the miss, tries to "correct" — burns another turn
+
+**The discipline:**
+
+- Treat the **PNG file on disk** as the source of truth for coordinates. Open it directly (or trust the chat-rendered image only if you've confirmed the rendered size equals the file's pixel size).
+- Coordinates you read from the PNG file are directly usable in `input tap` — no scaling, no normalization, no dp/sp conversion.
+- **WebViews are not special.** WebView content renders at the device's pixel density, so coordinates inside a WebView use the same absolute device-pixel coordinate system as native UI. Don't translate "client X/Y"-style browser coordinates; use absolute screen pixels.
+- If a tap misses on the first try, screencap and **verify your coordinate space before retrying** — don't iteratively guess. The most common silent failure: an agent reads coordinates from a 540×1200 thumbnail rendering and halves them for the actual `input tap` call. Both versions are wrong; only the raw 1080×2400 file coordinates are correct.
+
+For elements where pixel-perfect tapping is fragile (small buttons near screen edges, dynamically-positioned elements), prefer one of:
+
+- `adb shell input keyevent` for hardware keys (`KEYCODE_BACK`, `KEYCODE_HOME`, `KEYCODE_TAB`, etc.)
+- `adb shell input text "string"` for text entry (works regardless of which field has focus, as long as one does)
+- `adb shell am start -a android.intent.action.VIEW -d <deep-link>` to jump straight to an activity instead of navigating through taps
 
 ## User Context
 - The primary developer is a **Ruby on Rails / web backend developer** with minimal Android / Kotlin experience
@@ -339,5 +366,6 @@ After taking a screenshot, **read it back into the chat as an artifact** so the 
 - **`adb` reports `device offline`** → `adb kill-server && adb start-server && adb devices`. If still offline, the emulator process is wedged; kill and reboot it.
 - **Emulator "boots for a second then closes"** → almost always one of the two boot failure modes in the "Booting the emulator" section: a corrupt Quick Boot snapshot (`Failed to find ColorBuffer:0` in the log) or process-group teardown of a backgrounded launch. Use `MDRTAcademy/scripts/agent-boot-emulator.py` rather than launching `emulator` directly.
 - **`net::ERR_NAME_NOT_RESOLVED` in WebViews / `UnknownHostException` in network calls** → almost always means the emulator has no network at all, not a DNS-specific issue. Verify with `adb shell ping -c 1 8.8.8.8` — if it reports "Network is unreachable", `dumpsys connectivity` will paradoxically show the default route as registered while the kernel's `ip route` is missing it. Most common trigger: a recent `-wipe-data` boot. Fix: `adb shell cmd connectivity airplane-mode enable; sleep 3; adb shell cmd connectivity airplane-mode disable; sleep 8`. Non-destructive; takes ~12 seconds.
+- **`input tap` lands in the wrong place / "let me try the actual field locations and type" mid-turn** → coordinate-space confusion: you read pixel positions from a scaled rendering of the screenshot instead of the file's native dimensions. See "Tap coordinate discipline" in the On-device interaction section. The fix is never to iterate-and-guess; it's to verify `adb shell wm size` (this AVD is `1080x2400`) and read coordinates from the PNG file directly. WebViews use the same absolute device-pixel coordinates as native UI — no browser-style translation needed.
 - **`INSTALL_FAILED_INSUFFICIENT_STORAGE` on a ~128 MB APK** → see "Storage discipline" in the "Booting the emulator" section above. Short version: `adb uninstall` only recovers ~100 MB because the bloat is system (Play Services / dalvik cache), not your app. If the launcher is current (passes `-partition-size 16384`) and you still see this, the underlying `userdata-qemu.img` is on the old 6 GB layout — needs a one-time `-wipe-data` boot to actualize the larger partition. **Always preflight with `adb shell df -h /data` before installs ≥ 50 MB.**
 - **Edge-to-edge layout regression on Android 15 / SDK 35+** → `BaseActivity.kt` has the inset listener and bleed-color hooks; check `shouldApplyDefaultSystemBarInsets()`, `statusBarBleedColor()`, `navigationBarBleedColor()`, and `onSystemBarInsetsChanged()` before adding ad-hoc per-Activity insets handling. See `docs/agentic-showcase-edge-to-edge-deepdive.md` for the full rationale.
