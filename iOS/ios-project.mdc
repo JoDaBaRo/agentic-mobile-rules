@@ -148,6 +148,7 @@ blank iOS project with no distribution pipeline yet?"*
   - Distribution cert in macOS Keychain
   - Provisioning profiles in `~/Library/MobileDevice/Provisioning Profiles/`
 - If any are missing or expired, **stop and tell the user** rather than improvising.
+- **App Store Connect auth for TestFlight uploads** is separate from code signing. Preferred: an **App Store Connect API key** (`.p8` + key ID + issuer ID via `app_store_connect_api_key` — no 2FA, CI-safe), but generating one needs Account Holder/Admin access. Fallback when that's blocked: **Apple ID + app-specific password + a 2FA session** (`fastlane spaceauth -u <appleid>` → export `FASTLANE_SESSION`, ~30-day expiry; or answer the 2FA prompt interactively). Note `spaceauth` does not skip 2FA — it does 2FA once to mint a reusable session, and you still need the app-specific password for the binary upload. Pre-seed the session in `~/.zshenv` **via an editor** (never a shell `echo`/`pbpaste`). For a fully **unattended** run, any interactive Fastfile prompt (e.g. a build-number bump) must be answered through a real PTY (`expect`) — piping (`printf 'y\n' | fastlane`) does not work. If no API key is wired and no session is pre-seeded, **warn the user that `fastlane ios appstore` will hit an interactive 2FA prompt** and can hang headless. Full setup steps live in `ios-project-bootstrap.mdc` (Step 6f).
 
 ## App environments and bundle IDs
 

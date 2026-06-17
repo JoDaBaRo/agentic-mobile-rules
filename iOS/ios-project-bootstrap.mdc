@@ -311,21 +311,86 @@ platform :ios do
 end
 ```
 
-### 6f — Generate app-specific password
+### 6f — App Store Connect authentication (pick one)
 
-Required for TestFlight uploads:
+TestFlight uploads authenticate to App Store Connect **separately from code
+signing**. Two options, with very different headless behavior:
 
-1. Go to https://appleid.apple.com
-2. Sign in → Security → App-Specific Passwords
-3. Generate one, label it "Fastlane"
-4. Put the password in `config.yml` under `app_specific_password`
+**Option A — App Store Connect API key (preferred; no 2FA, CI-safe).**
+Requires **Account Holder or Admin** on the team to generate.
+1. App Store Connect → **Users and Access → Integrations → App Store Connect API**
+2. Generate a **Team Key** (App Manager role is enough for TestFlight)
+3. Save the three values: **Issuer ID** (UUID), **Key ID** (10 chars), and the
+   **`.p8`** (downloadable once) → `fastlane/AuthKey_<KeyID>.p8`, gitignored
+4. Wire it ahead of the upload in the Fastfile:
+   ```ruby
+   app_store_connect_api_key(
+     key_id: "XXXXXXXXXX",
+     issuer_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+     key_filepath: "./fastlane/AuthKey_XXXXXXXXXX.p8"
+   )
+   ```
+   `upload_to_testflight` then needs no Apple ID, no password, no 2FA.
 
-Set it as env var so Fastlane picks it up:
-```bash
-export FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+**Option B — Apple ID + app-specific password + 2FA session (fallback).**
+Use this when you can't create an API key (no Admin access). The upload step
+becomes **interactive** (a 2FA prompt) unless you pre-seed a session.
+1. Generate an app-specific password at https://appleid.apple.com → Security →
+   App-Specific Passwords; put it in `config.yml` and export it:
+   ```bash
+   export FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+   ```
+   (That covers the binary upload, but build-management API calls still need a
+   2FA web session.)
+2. Either run interactively and type the 6-digit code when prompted, **or**
+   pre-seed a ~30-day session:
+   ```bash
+   fastlane spaceauth -u your@appleid.com   # prompts once; prints FASTLANE_SESSION='...'
+   ```
+   Put the printed `export FASTLANE_SESSION='...'` line into `~/.zshenv` **using
+   a text editor** (one physical line). An agent's non-interactive shell sources
+   `~/.zshenv`, so it inherits the session and the 2FA prompt is pre-satisfied.
+   Re-run `spaceauth` (and re-edit) when it expires (~30 days).
+   - **Never write the session via a shell command** (`echo`, and especially
+     `pbpaste >> ~/.zshenv`). If the clipboard ever holds the wrong text this
+     becomes a self-replicating line that fills `~/.zshenv` and hangs every
+     shell. Editor only. Verify with `zsh -c 'echo ${FASTLANE_SESSION:+set}'`.
+
+> **`spaceauth` does NOT skip 2FA, and is NOT a replacement for the
+> app-specific password.** It *is* the 2FA step — you do 2FA **once** to mint
+> the session, and the cached `FASTLANE_SESSION` then lets later runs skip the
+> prompt for ~30 days. The session only covers the App Store Connect web API;
+> the binary upload still uses the app-specific password, so Option B needs
+> **both**. Net effect: `spaceauth` avoids needing an **API key** and avoids
+> **re-entering 2FA every run** — it does not eliminate 2FA itself.
+
+Default to Option A. Only fall back to Option B if API-key creation is blocked
+by team-role access.
+
+**Placeholder footgun (read this if you wire your helper to read the key from
+config):** make the "use the API key" decision check that the values are
+**real** (not `REPLACE_WITH_*`) AND that the `.p8` **exists on disk** — not just
+that the keys are present. A presence-only check treats placeholder strings as
+"configured," takes the API-key branch, and dies on a missing `.p8` without ever
+trying the session. If you're on Path B, the safest config is to **omit the
+`app_store_connect_api_key` block entirely**.
+
+**Unattended agent/CI runs — interactive prompts need a real PTY.** If your
+Fastfile has *any* interactive prompt (e.g. a `Bump build number? (y/n)`),
+**piping the answer does NOT work**: `printf 'y\n' | fastlane …` gives no TTY,
+so fastlane's `prompt` returns the empty default (and may crash, e.g.
+`undefined method 'downcase' for nil`). Drive it under a pseudo-TTY with
+`expect`:
+```expect
+#!/usr/bin/expect -f
+set timeout -1
+spawn fastlane ios appstore
+expect "(y/n)"
+send "y\r"
+expect eof
 ```
-
-(Or handle this in a configuration helper like the MDRT project does.)
+With Path A (API key) or a pre-seeded Path B session, auth needs no input, so
+`expect` only has to answer the prompt — fully unattended.
 
 ## Step 7 — App Store Connect listing
 
