@@ -160,6 +160,69 @@ blank iOS project with no distribution pipeline yet?"*
 
 QA is the default for everyday work. Always confirm which environment the user means before distributing.
 
+## Booting the simulator (fewer sharp edges than Android — here's why)
+
+The default device is `iPhone 16`. Unlike the Android emulator, a backgrounded
+boot from an agent shell is **safe** — you can just run:
+
+```bash
+xcrun simctl boot "iPhone 16"   # returns immediately; device keeps running
+open -a Simulator               # optional: show the window (boot works headless too)
+```
+
+Three failure modes bite the Android emulator. Here's how each maps to iOS,
+so the next agent doesn't go looking for problems that don't exist:
+
+1. **Process-group teardown — NO-OP on iOS (no launcher needed).** Android
+   needs a double-fork + `os.setsid()` launcher because `emulator -avd` is a
+   long-running foreground process that the harness kills when the spawning
+   shell returns. `xcrun simctl boot` is **not** that — it's a thin IPC client
+   that asks the launchd-managed `com.apple.CoreSimulator.CoreSimulatorService`
+   daemon to boot the device, then exits. The simulator's `launchd_sim` ends up
+   parented to `/sbin/launchd` (**ppid=1**), not your shell. Verified: after a
+   backgrounded `simctl boot` and shell exit, the device stays `Booted`
+   indefinitely (`xcrun simctl list devices booted` confirms). **Do not port
+   the Android `agent-boot-emulator.py` launcher — iOS has no equivalent need.**
+
+2. **Corrupt persistent state — DIFFERENT (no snapshot model).** iOS Simulator
+   has no Quick Boot snapshot, so there's nothing analogous to Android's
+   `-no-snapshot-load` / `fastboot.forceColdBoot` and no `ColorBuffer:0` GPU
+   restore crash. It *can* still wedge, but the recovery ladder is different —
+   escalate in this order:
+   - **App won't install / "Failed to install app"** or transient weirdness →
+     `xcrun simctl shutdown <device> && xcrun simctl boot <device>`.
+   - **"Unable to boot the Simulator"** → clear the sim caches:
+     `rm -rf ~/Library/Developer/CoreSimulator/Caches/*` then retry boot.
+   - **`CoreSimulatorService` crash loop / "service died" / launchd_sim
+     "could not bind to session"** → `killall -9 com.apple.CoreSimulator.CoreSimulatorService`
+     (launchd auto-restarts it), then boot again.
+   - **Stale/broken devices after an Xcode or runtime update** →
+     `xcrun simctl delete unavailable`.
+   - **Full reset of one device (analogous to Android `-wipe-data`)** →
+     `xcrun simctl erase <device>` (wipes installed apps + data, keeps the device).
+   - **Nuclear** → `xcrun simctl erase all`.
+
+3. **Storage discipline — DIFFERENT (host disk, not an in-sim partition).**
+   There is no fixed `/data` partition cap and no `INSTALL_FAILED_INSUFFICIENT_STORAGE`
+   equivalent inside the simulator — its storage grows dynamically under
+   `~/Library/Developer/CoreSimulator/Devices/<UUID>/data/` until the **Mac host
+   volume** fills. The failure surfaces as host-level "No space left on device"
+   or `SimDiskImageError Code 14` (most common when *installing a new simulator
+   runtime*, which needs ~7 GB unpacked). So the discipline is host-side:
+   - **Preflight before installing a new Xcode/runtime or a large app:**
+     `df -h ~` — Apple DTS recommends keeping **≥ 40-50 GB free** on the boot
+     volume for runtime installs.
+   - **What accumulates** (audit with `du -sh`): unused simulator devices
+     (`~/Library/Developer/CoreSimulator/Devices/`), `DerivedData`
+     (`~/Library/Developer/Xcode/DerivedData/`), on-device symbol caches
+     (`~/Library/Developer/Xcode/iOS DeviceSupport/`), and old runtimes.
+   - **Cleanup ladder:** `xcrun simctl delete unavailable` (orphan devices) →
+     delete unused runtimes in Xcode → Settings → Components → clear
+     `DerivedData` **only if** no active SPM cache you can't refetch lives there
+     (this repo's EightBitVideo cache is in the SwiftPM repo cache, not
+     DerivedData, so clearing DerivedData is safe here). There's no per-install
+     `df` check needed inside the sim — the host `df -h ~` is the only gauge.
+
 ## On-device interaction (the agent's "browser" for mobile)
 - Boot simulator: `xcrun simctl boot "iPhone 16"`
 - Install: `xcrun simctl install booted path/to/MDRTAcademy.app`
@@ -199,3 +262,6 @@ After taking a screenshot, **read it back into the chat as an artifact** so the 
 - **`No signing certificate "iOS Distribution" found`** → Distribution cert not in keychain. Fix: `fastlane cert --development false` or Xcode > Settings > Accounts > Manage Certificates.
 - **`Code Signing Error: Provisioning profile doesn't include signing certificate`** → Profile was generated with a different cert. Regenerate: `fastlane sigh --adhoc --force`.
 - **New tester can't install ad-hoc build** → Their device UDID isn't in the provisioning profile. Follow the add-tester flow in the onboarding rule.
+- **Backgrounded `simctl boot` "died" / device not `Booted`** → unlike Android, this is NOT process-group teardown (see "Booting the simulator"). `simctl boot` is fire-and-forget; if the device isn't `Booted`, the service wedged. Recovery: `killall -9 com.apple.CoreSimulator.CoreSimulatorService` then re-boot. Do not reach for a launcher script — iOS doesn't need one.
+- **"Unable to boot the Simulator" / `CoreSimulatorService` errors** → clear `~/Library/Developer/CoreSimulator/Caches/*`, then `killall -9 com.apple.CoreSimulator.CoreSimulatorService` and retry. See the recovery ladder in "Booting the simulator".
+- **`SimDiskImageError Code 14` / "Cannot copy the image because the disk is almost full"** → host disk pressure, NOT an in-simulator partition limit (there is no Android-style `INSTALL_FAILED_INSUFFICIENT_STORAGE` here). Preflight `df -h ~` (want ≥ 40-50 GB free for a runtime install); reclaim with `xcrun simctl delete unavailable` + remove unused runtimes. See "Storage discipline" in "Booting the simulator".
