@@ -279,6 +279,15 @@ old 6 GB layout):
    `disk.dataPartition.size = <bytes>` — values: 16 GB = `17179869184`, 32 GB = `34359738368`, 64 GB = `68719476736`. *(The original default was 6442450944 = 6 GB.)*
 3. Boot once with `emulator -avd Medium_Phone_API_36 -wipe-data -partition-size <MB> -no-snapshot-load` to recreate the image at the new size (16 GB = `16384`, 32 GB = `32768`, 64 GB = `65536`). Loses any cached state on the emulator (Google sign-in, dev settings).
 4. Update the launcher script's `-partition-size` line to match, so future boots stay at the new size without needing `-wipe-data`.
+5. **Kick networking after the wipe boot.** `-wipe-data` clears the saved Wi-Fi state, and on the next cold boot the routes that `ConnectivityService` reports as installed don't actually make it into the kernel's routing table (you'll see "Network is unreachable" for any host outside `10.0.2.0/24`, and apps fail with `net::ERR_NAME_NOT_RESOLVED` or `UnknownHostException`). Force a re-sync:
+   ```bash
+   adb shell cmd connectivity airplane-mode enable
+   sleep 3
+   adb shell cmd connectivity airplane-mode disable
+   sleep 8
+   adb shell ping -c 1 8.8.8.8       # verify; should now succeed
+   ```
+   Non-destructive — apps + data intact. Only needed once per wipe-data boot.
 
 `adb uninstall com.mdrt.mdrtacademy.qa` still helps marginally between dry-run
 cycles, but it's a +100 MB recovery, not a fix.
@@ -329,5 +338,6 @@ After taking a screenshot, **read it back into the chat as an artifact** so the 
 - **App installs but crashes on launch with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`** → the signing certificate changed (you built a release variant over a debug, or vice versa). `adb uninstall <package_id>` then re-install.
 - **`adb` reports `device offline`** → `adb kill-server && adb start-server && adb devices`. If still offline, the emulator process is wedged; kill and reboot it.
 - **Emulator "boots for a second then closes"** → almost always one of the two boot failure modes in the "Booting the emulator" section: a corrupt Quick Boot snapshot (`Failed to find ColorBuffer:0` in the log) or process-group teardown of a backgrounded launch. Use `MDRTAcademy/scripts/agent-boot-emulator.py` rather than launching `emulator` directly.
+- **`net::ERR_NAME_NOT_RESOLVED` in WebViews / `UnknownHostException` in network calls** → almost always means the emulator has no network at all, not a DNS-specific issue. Verify with `adb shell ping -c 1 8.8.8.8` — if it reports "Network is unreachable", `dumpsys connectivity` will paradoxically show the default route as registered while the kernel's `ip route` is missing it. Most common trigger: a recent `-wipe-data` boot. Fix: `adb shell cmd connectivity airplane-mode enable; sleep 3; adb shell cmd connectivity airplane-mode disable; sleep 8`. Non-destructive; takes ~12 seconds.
 - **`INSTALL_FAILED_INSUFFICIENT_STORAGE` on a ~128 MB APK** → see "Storage discipline" in the "Booting the emulator" section above. Short version: `adb uninstall` only recovers ~100 MB because the bloat is system (Play Services / dalvik cache), not your app. If the launcher is current (passes `-partition-size 16384`) and you still see this, the underlying `userdata-qemu.img` is on the old 6 GB layout — needs a one-time `-wipe-data` boot to actualize the larger partition. **Always preflight with `adb shell df -h /data` before installs ≥ 50 MB.**
 - **Edge-to-edge layout regression on Android 15 / SDK 35+** → `BaseActivity.kt` has the inset listener and bleed-color hooks; check `shouldApplyDefaultSystemBarInsets()`, `statusBarBleedColor()`, `navigationBarBleedColor()`, and `onSystemBarInsetsChanged()` before adding ad-hoc per-Activity insets handling. See `docs/agentic-showcase-edge-to-edge-deepdive.md` for the full rationale.
