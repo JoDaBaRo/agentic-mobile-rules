@@ -55,6 +55,27 @@ Before touching any console, confirm with the user:
   account.
 - They have a **credit card** ready ($99/year fee).
 
+## Placeholders used below
+
+Replace these consistently everywhere they appear in this guide:
+
+| Placeholder | Meaning | Example |
+|---|---|---|
+| `<your-project-root>` | repo root that contains the `.xcodeproj` | `~/code/myapp` |
+| `<your-team-id>` | 10-char Apple Developer Team ID | `6DMKJU6X25` |
+| `your@appleid.com` | Apple ID email on the Developer account | — |
+| `Your Team Name` | Apple Developer team display name | — |
+| `com.company.appname` / `com.company.appname-QA` | production / QA bundle IDs | — |
+| `MyApp` | Xcode target / scheme base name (also reused as the Firebase project name) | — |
+| `<your-firebase-cli-token>` | output of `firebase login:ci` | — |
+| `<firebase-app-id>` | iOS app ID from the Firebase console | `1:123:ios:abc` |
+| `qa-testers` | Firebase App Distribution tester-group alias | — |
+| `XXXXXXXXXX` / `xxxxxxxx-…-xxxxxxxxxxxx` | App Store Connect API **Key ID** / **Issuer ID** | — |
+
+Scheme names like `Release - QA` and `Release - Production` are **not**
+placeholders — they're the naming convention this flow establishes; use them
+verbatim (or match whatever your `.xcodeproj` actually defines).
+
 ## Step 1 — Apple Developer Program enrollment
 
 **This is the first gate.** Read aloud:
@@ -203,6 +224,17 @@ firebase login:ci
 
 ## Step 6 — Set up Fastlane from scratch
 
+**Who does what (this is where the agent does the heavy lifting).** The agent
+*can and should* set up the whole `appstore` (and `qa`) lane: run `fastlane
+init`, write the `Appfile`, `config.yml`, `Pluginfile`, and the `Fastfile`
+lanes, wire authentication, and run/verify the lanes. The only pieces that
+**must be a human in a browser** are the App Store Connect / Developer-portal
+actions that have no API the agent can drive: enrolling in the Developer
+Program (Step 1), registering the App ID (Step 2), generating the API key
+(Step 6f, Option A — requires Admin), creating the App Store listing + metadata
+(Step 7), and clicking "Submit for Review." Hand those to the user; the agent
+does everything CLI/config and then drives the lane.
+
 ### 6a — Initialize Fastlane
 
 ```bash
@@ -249,9 +281,9 @@ Create `fastlane/config.yml`:
 ```yaml
 default: &default
   team_id: "<your-team-id>"
-  app_name: 'YourApp'
-  build_target: 'YourApp'
-  scheme_name: 'YourApp'
+  app_name: 'MyApp'
+  build_target: 'MyApp'
+  scheme_name: 'MyApp'
   app_specific_password: '<generate-at-appleid.apple.com>'
   slack:
     notify: false
@@ -267,7 +299,7 @@ qa:
   scheme_name: 'Release - QA'
   firebase:
     <<: *firebase
-    app_id: '<firebase-app-id-from-console>'
+    app_id: '<firebase-app-id>'
 
 appstore:
   <<: *default
@@ -291,7 +323,7 @@ platform :ios do
     firebase_app_distribution(
       app: "<firebase-app-id>",
       groups: "qa-testers",
-      firebase_cli_token: "<your-token>",
+      firebase_cli_token: "<your-firebase-cli-token>",
       release_notes: "QA build"
     )
   end
@@ -321,7 +353,7 @@ Requires **Account Holder or Admin** on the team to generate.
 1. App Store Connect → **Users and Access → Integrations → App Store Connect API**
 2. Generate a **Team Key** (App Manager role is enough for TestFlight)
 3. Save the three values: **Issuer ID** (UUID), **Key ID** (10 chars), and the
-   **`.p8`** (downloadable once) → `fastlane/AuthKey_<KeyID>.p8`, gitignored
+   **`.p8`** (downloadable once) → `fastlane/AuthKey_XXXXXXXXXX.p8`, gitignored
 4. Wire it ahead of the upload in the Fastfile:
    ```ruby
    app_store_connect_api_key(
