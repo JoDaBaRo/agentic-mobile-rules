@@ -1,15 +1,8 @@
 # Agentic Mobile Rules
 
 A collection of Cursor rule files (`.mdc`) that turn the Cursor agent into a
-productive mobile-dev teammate — without requiring Android Studio or Xcode
+productive mobile-dev teammate without requiring Android Studio or Xcode
 for day-to-day work.
-
-These rules were built for and live-demonstrated in the talk
-**"Mobile development, without a mobile IDE"**. The full talk runbook lives
-in `mdrtacademy_android/MDRTAcademy/docs/agentic-showcase.md`; this folder
-is the **portable, shareable artifact** of that talk — drop these rules into
-any mobile project's `.cursor/rules/` directory and the agent picks up the
-behaviors.
 
 ## What's in here
 
