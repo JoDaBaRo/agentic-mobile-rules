@@ -1,5 +1,5 @@
 ---
-description: Walks a new developer through one-time setup of an EXISTING configured iOS project from a blank macOS install — Xcode, Fastlane, SPM dependencies, code signing, simulator, and a smoke-test build. Assumes App Store Connect + Firebase + Fastlane are already configured upstream; user just needs local toolchain + credentials. Use when the user says they're joining the team, setting up the project for the first time, can't build, asks "what do I need to install", or asks to be onboarded.
+description: Walks a new developer through one-time setup of an EXISTING configured iOS project from a blank macOS install — Xcode, Fastlane, SPM dependencies, code signing, simulator, and a smoke-test build. Assumes App Store Connect + Firebase + Fastlane are already configured upstream; user just needs local toolchain + credentials. Use when the user says they're joining the team, setting up the project for the first time, can't build, asks "what do I need to install", asks to be onboarded, OR says they're "setting up for CLI development", "setting up this repo for CLI", "working without Xcode" / "without Xcode day-to-day", "switching to Cursor for iOS", "switching from Xcode to Cursor", or any phrasing where they want to drive this repo via Cursor + CLI instead of working in Xcode day-to-day.
 alwaysApply: false
 ---
 
@@ -18,6 +18,41 @@ You are guiding a human through one-time setup. The audience: typically a
 **web / Rails developer with minimal iOS experience** (see "User Context"
 in `.cursor/rules/ios-project.mdc` for the analogy vocabulary to use when
 explaining concepts).
+
+## Preamble — what you're opting into (state this aloud before Step 0)
+
+Before any commands, set **honest** expectations. This onboarding sets up
+**CLI-driven iOS dev with Cursor as the primary workspace** — but be candid
+that **Xcode is more load-bearing on iOS than Android Studio is on Android.**
+Do not oversell "you'll never open Xcode"; that's true on Android, not here.
+
+**What shifts to Cursor (the everyday loop):** building, running on the
+Simulator, install/launch, screenshots, deep links, push notifications,
+regenerating localized strings, and shipping via Fastlane (QA → Firebase,
+TestFlight → App Store). You ask the agent; it drives `xcodebuild`,
+`xcrun simctl`, and `fastlane`.
+
+**What genuinely still needs Xcode (don't pretend otherwise):**
+- **Xcode must be installed** — it provides the iOS SDK and Simulator runtimes; the Command Line Tools alone are not enough (this is unlike Android, where a 200 MB CLI install + an AVD needs no Android Studio).
+- **Code signing is GUI-gated at least once** — adding the Apple Developer account in **Xcode → Settings → Accounts** (Step 5) registers the signing identity in the keychain so the CLI/Fastlane can use it.
+- **Interface Builder** — this is a UIKit + Storyboards/XIB app, so *visual* layout edits happen in Xcode's storyboard editor. The agent can edit code and validate storyboards with `ibtool`, but it can't lay a screen out visually.
+- **Instruments, the view debugger, and the capabilities/entitlements UI** have no real CLI equivalent.
+
+So the honest stance: **Xcode stays open more than Android Studio would** —
+for signing setup, Interface Builder work, and profiling — while the
+build/run/ship loop moves to Cursor. The project rule (`ios-project.mdc`) is
+already in place and teaches the agent this repo's conventions; you are not
+writing it during onboarding.
+
+**Time: ~60–90 minutes** the first time (Xcode is a ~12 GB+ download if not
+already installed, and SPM packages compile on the first build). **Longer if
+Apple Developer Program enrollment is in the loop** — that's a separate
+~24–48h approval gate (covered in `ios-project-bootstrap.mdc`); this rule
+assumes the team's Apple account and signing already exist.
+
+If the user was expecting a pure-Xcode walkthrough, this isn't that — but
+unlike Android, you won't be closing Xcode entirely. **Confirm they want the
+CLI-primary workflow before starting Step 0.**
 
 ## Operating principles for this walkthrough
 

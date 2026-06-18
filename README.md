@@ -89,7 +89,7 @@ and walks you through it step by step:
 
 1. Confirms your OS, shell, admin access, and that the repo is cloned.
 2. Audits what's already installed — routes to install steps only for what's missing.
-3. Sets shell env vars (`JAVA_HOME`, `ANDROID_HOME`, `PATH`) in your rc file.
+3. Sets up the local toolchain config — shell env vars (`JAVA_HOME`, `ANDROID_HOME`, `PATH`) in your rc file (Android). On iOS there are no such env vars; instead it registers your **code-signing identity** (Apple Developer account in Xcode → Settings → Accounts, distribution cert, provisioning profiles).
 4. Walks you through acquiring credential files (team members ask the project
    owner; solo devs go through Firebase Console + Cloud Console + `keytool`).
 5. Creates an AVD and boots it (Android) or boots a Simulator (iOS).
