@@ -116,19 +116,6 @@ This pattern is portable across mobile platforms (Android, iOS, React Native,
 Flutter) because the *shape* of the work is the same — only the toolchain
 names change.
 
-## Provenance
-
-Built and shipped as part of the **"Mobile development, without a mobile IDE"**
-talk by Jose David Bayona at LaunchPad Lab / SPACE. The companion docs in the
-`mdrtacademy_android` repo explain the talk's three pillars:
-
-1. Your IDE doesn't matter. The CLI does.
-2. The agent drives the simulator like a web agent drives the browser.
-3. One afternoon of setup, then every future delivery is one prompt.
-
-These rules are the embodiment of pillar #3 — the one-time setup made durable
-and shareable.
-
 ## License
 
 (Add your preferred license — MIT / Apache-2.0 / CC0 are common choices for
