@@ -115,8 +115,3 @@ and a tested DRAFT-safety guard on top of the onboarding flow above.
 This pattern is portable across mobile platforms (Android, iOS, React Native,
 Flutter) because the *shape* of the work is the same — only the toolchain
 names change.
-
-## License
-
-(Add your preferred license — MIT / Apache-2.0 / CC0 are common choices for
-this kind of shareable agent-config artifact.)
