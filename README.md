@@ -77,6 +77,33 @@ agentic-mobile-rules/
    The agent should recite back the env vars, package id(s), and Gradle
    tasks from the main rule.
 
+## Here is how to onboard your project
+
+Once the rules are in your project, the onboarding rule does the rest.
+Open Cursor and tell the agent something like:
+
+> I'm setting up this repo for CLI development.
+
+The agent picks up `android-project-onboarding.mdc` (or the iOS equivalent)
+and walks you through it step by step:
+
+1. Confirms your OS, shell, admin access, and that the repo is cloned.
+2. Audits what's already installed — routes to install steps only for what's missing.
+3. Sets shell env vars (`JAVA_HOME`, `ANDROID_HOME`, `PATH`) in your rc file.
+4. Walks you through acquiring credential files (team members ask the project
+   owner; solo devs go through Firebase Console + Cloud Console + `keytool`).
+5. Creates an AVD and boots it (Android) or boots a Simulator (iOS).
+6. Runs a smoke build to verify the whole chain.
+7. Smoke-tests the agent loop with a trivial prompt.
+
+Total: ~60–90 minutes the first time, mostly waiting on SDK downloads.
+After that, every future bug on this project is just a prompt.
+
+If you are setting up a **brand-new project** (no Firebase or Play Console
+yet), say so explicitly. The agent then picks up the bootstrap rule instead,
+which adds Firebase project creation, Play Console signup, plugin wiring,
+and a tested DRAFT-safety guard on top of the onboarding flow above.
+
 ## Anatomy of the three-tier rule pattern
 
 | Tier | File | Loads | What it does |

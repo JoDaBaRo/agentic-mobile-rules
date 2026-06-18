@@ -1,5 +1,5 @@
 ---
-description: Walks a new developer through one-time setup of an EXISTING configured Android project from a blank macOS install — JDK, Android SDK, AVD, scrcpy, shell env vars, credential files, and a smoke-test build. Assumes Firebase project + Play Console listing already exist; user just needs to acquire credentials. Use when the user says they're joining the team, setting up the project for the first time, can't build at all, asks "what do I need to install", or asks to be onboarded.
+description: Walks a new developer through one-time setup of an EXISTING configured Android project from a blank macOS install — JDK, Android SDK, AVD, scrcpy, shell env vars, credential files, and a smoke-test build. Assumes Firebase project + Play Console listing already exist; user just needs to acquire credentials. Use when the user says they're joining the team, setting up the project for the first time, can't build at all, asks "what do I need to install", asks to be onboarded, OR says they're "setting up for CLI development", "setting up this repo for CLI", "working without Android Studio", "switching to Cursor for Android", or any phrasing where they want to use this repo via Cursor + CLI instead of opening Android Studio day-to-day.
 alwaysApply: false
 ---
 
@@ -21,6 +21,22 @@ You are guiding a human through one-time setup. The audience: typically a
 **web / Rails developer with minimal Android experience** (see "User Context"
 in `.cursor/rules/android-project.mdc` for the analogy vocabulary to use when
 explaining concepts).
+
+## Preamble — what you're opting into (state this aloud before Step 0)
+
+Before any commands, briefly set expectations. This onboarding sets up
+**CLI-driven Android dev with Cursor as the everyday workspace.** The
+mental shift from a typical Android Studio workflow:
+
+- **Day-to-day work happens in Cursor**, not Android Studio. You ask the agent to install, run, screenshot, log, ship; the agent invokes Gradle and `adb` under the hood.
+- **Android Studio stays installed but mostly closed.** Keep it on disk for the ~10% of work that genuinely needs the debugger UI, Profiler flamegraphs, or interactive Layout Inspector. Don't open it for routine builds.
+- **A project rule (`.cursor/rules/android-project.mdc`) teaches the agent the conventions of this repo**, so it doesn't have to be re-taught every chat. The rule is already in place; you're not writing it during onboarding.
+- **Expected time: ~60–90 minutes the first time**, mostly waiting on SDK downloads. After that, every future bug on this project is just a prompt to the agent — that's the durable payoff.
+
+If the user was expecting an Android Studio walkthrough, this isn't that.
+Confirm they want to proceed with the CLI workflow before starting Step 0.
+If they were expecting Android Studio, point them at Google's standard
+docs at `developer.android.com/studio` — this rule isn't the right tool.
 
 ## Operating principles for this walkthrough
 
